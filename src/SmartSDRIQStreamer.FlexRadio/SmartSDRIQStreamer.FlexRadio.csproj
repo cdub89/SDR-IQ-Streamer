@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SDRIQStreamer.FlexRadio</AssemblyName>
+    <RootNamespace>SDRIQStreamer.FlexRadio</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\FlexLib_API_v4.1.5.39794\FlexLib\FlexLib.csproj" />
+  </ItemGroup>
+</Project>

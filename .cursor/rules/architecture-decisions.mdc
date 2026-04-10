@@ -1,0 +1,24 @@
+---
+description: Check and update SmartSDR-IQ-Streamer.MDC when making major technical or product decisions
+alwaysApply: true
+---
+
+# Architecture document discipline
+
+When making **major** technical or product decisions (e.g. new components, FlexLib upgrade, CW Skimmer integration approach, phase scope, or stack changes):
+
+1. **Check** the project architecture document: `SmartSDR-IQ-Streamer.MDC` (repository root).
+2. **Align** the proposed approach with the documented goals, stack, high-level architecture, and phases.
+3. **Update** `SmartSDR-IQ-Streamer.MDC` if the decision changes any of:
+   - Technology stack (Section 2)
+   - High-level architecture or component boundaries (Section 3)
+   - FlexRadio integration approach or version (Section 4)
+   - CW Skimmer integration approach (Section 5)
+   - Project layout (Section 6)
+   - Testing/upgrade strategy (Section 7)
+   - Document metadata / FlexLib version (Section 8)
+   - Phases (Section 9)
+
+4. **Remind** the user that approval is required before coding (per architecture Section 1).
+
+Keep the architecture doc concise; avoid duplicating implementation detail that belongs in code or README.

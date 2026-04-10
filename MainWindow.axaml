@@ -1,0 +1,203 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:SDRIQStreamer.App"
+        xmlns:flex="clr-namespace:SDRIQStreamer.FlexRadio;assembly=SDRIQStreamer.FlexRadio"
+        mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="300"
+        x:Class="SDRIQStreamer.App.MainWindow"
+        x:DataType="local:MainWindowViewModel"
+        x:Name="Root"
+        Title="SDR-IQ-Streamer"
+        Width="390" SizeToContent="Height"
+        MinWidth="330" MinHeight="150">
+
+    <StackPanel Margin="12" Spacing="4">
+
+        <!-- Title -->
+        <TextBlock Text="SDR-IQ-Streamer"
+                   FontSize="15" FontWeight="SemiBold"
+                   Margin="0,0,0,4"/>
+
+        <!-- Connection status -->
+        <TextBlock Text="{Binding ConnectionStatus}"
+                   FontSize="12" Foreground="Green"
+                   IsVisible="{Binding IsConnected}"/>
+
+        <!-- Discovering / no radio message -->
+        <TextBlock Text="{Binding StatusText}"
+                   FontSize="12" Foreground="Gray"
+                   IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+        <!-- Radio list header + action -->
+        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,2">
+            <TextBlock Grid.Column="0" Text="Available Radios" FontSize="11" Foreground="Gray"/>
+            <Button Grid.Column="1"
+                    Content="Connect"
+                    MinWidth="48"
+                    Height="16"
+                    FontSize="9"
+                    Padding="4,0"
+                    Command="{Binding ConnectCommand}"
+                    IsVisible="{Binding !IsConnected}"/>
+            <Button Grid.Column="1"
+                    Content="Disconnect"
+                    MinWidth="48"
+                    Height="16"
+                    FontSize="9"
+                    Padding="4,0"
+                    Command="{Binding DisconnectCommand}"
+                    IsVisible="{Binding IsConnected}"/>
+        </Grid>
+        <ListBox ItemsSource="{Binding Radios}"
+                 SelectedItem="{Binding SelectedRadio}"
+                 SelectionMode="Single">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="flex:DiscoveredRadio">
+                    <TextBlock Text="{Binding DisplayLabel}" FontSize="12" Padding="2"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Client → Pan → Slice hierarchy (visible when connected) -->
+        <ItemsControl ItemsSource="{Binding ClientGroups}"
+                      IsVisible="{Binding IsConnected}"
+                      Margin="0,6,0,0">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="local:ClientGroup">
+
+                    <StackPanel Spacing="4" Margin="0,4,0,0">
+
+                        <!-- Station + DAX streaming rate -->
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0"
+                                       FontSize="12" FontWeight="SemiBold">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="Station:  {0}">
+                                        <Binding Path="Station"/>
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                            <TextBlock Grid.Column="1"
+                                       FontSize="11"
+                                       Foreground="Green"
+                                       VerticalAlignment="Center">
+                                <TextBlock.Text>
+                                    <Binding Path="#Root.((local:MainWindowViewModel)DataContext).DaxStreamingSummary"/>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </Grid>
+
+                        <!-- Panadapters for this client -->
+                        <ItemsControl ItemsSource="{Binding Panadapters}" Margin="8,0,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="local:PanSliceGroup">
+                                    <Border BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,2,0,2">
+                                        <StackPanel Spacing="2">
+                                            <!-- Stream status for this pan's DAX-IQ channel -->
+                                            <TextBlock Text="{Binding StreamSummary}"
+                                                       FontSize="11"
+                                                       Foreground="DarkCyan"
+                                                       VerticalAlignment="Center"/>
+
+                                            <!-- Slices for this pan -->
+                                            <ItemsControl ItemsSource="{Binding Slices}" Margin="8,1,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:SliceViewModel">
+                                                        <TextBlock Text="{Binding DisplayLabel}"
+                                                                   FontSize="11"
+                                                                   VerticalAlignment="Center"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                    </StackPanel>
+
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- Stream request status -->
+        <TextBlock Text="{Binding StreamRequestStatus}"
+                   FontSize="11" Foreground="DarkOrange"
+                   IsVisible="{Binding StreamRequestStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                   Margin="0,2,0,0"/>
+
+        <!-- CW Skimmer section (always visible) -->
+        <Separator Margin="0,8,0,4" Background="#DDD"/>
+        <TextBlock Text="CW Skimmer" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
+
+        <!-- Exe path row -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,2,0,0">
+            <TextBox Grid.Column="0"
+                     Text="{Binding CwSkimmerExePath}"
+                     Watermark="Path to CwSkimmer.exe"
+                     FontSize="11"
+                     Height="20"/>
+            <Button Grid.Column="1"
+                    Content="Browse…"
+                    MinWidth="52"
+                    Height="16"
+                    FontSize="9"
+                    Padding="4,0"
+                    Click="OnBrowseCwSkimmer"/>
+        </Grid>
+
+        <!-- Per-channel launch rows -->
+        <ItemsControl ItemsSource="{Binding DaxIQStreams}" Margin="0,4,0,0">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="flex:DaxIQStreamInfo">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,1,0,1">
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding SkimmerRowLabel}"
+                                   FontSize="11"
+                                   Foreground="DarkCyan"
+                                   VerticalAlignment="Center"/>
+                        <Button Grid.Column="1"
+                                Content="Launch"
+                                MinWidth="52"
+                                Height="16"
+                                FontSize="9"
+                                Padding="4,0"
+                                Command="{Binding #Root.((local:MainWindowViewModel)DataContext).LaunchCwSkimmerForChannelCommand}"
+                                CommandParameter="{Binding}"
+                                IsVisible="{Binding !IsSkimmerRunning}"/>
+                        <Button Grid.Column="1"
+                                Content="Stop"
+                                MinWidth="52"
+                                Height="16"
+                                FontSize="9"
+                                Padding="4,0"
+                                Command="{Binding #Root.((local:MainWindowViewModel)DataContext).StopCwSkimmerForChannelCommand}"
+                                CommandParameter="{Binding}"
+                                IsVisible="{Binding IsSkimmerRunning}"/>
+                    </Grid>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- Footer status log -->
+        <Separator Margin="0,6,0,2" Background="#DDD"/>
+        <TextBlock Text="Status" FontSize="10" Foreground="Gray"/>
+        <Border BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="4" Margin="0,1,0,0">
+            <TextBox Text="{Binding FooterStatusText}"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     FontSize="10"
+                     Foreground="DarkOrange"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     MaxHeight="80"
+                     TextWrapping="Wrap"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+        </Border>
+
+    </StackPanel>
+</Window>

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="SmartSDRIQStreamer.csproj" />
+  <Project Path="src/SmartSDRIQStreamer.FlexRadio/SmartSDRIQStreamer.FlexRadio.csproj" />
+  <Project Path="src/SmartSDRIQStreamer.CWSkimmer/SmartSDRIQStreamer.CWSkimmer.csproj" />
+  <Project Path="tests/SmartSDRIQStreamer.CWSkimmer.Tests/SmartSDRIQStreamer.CWSkimmer.Tests.csproj" />
+</Solution>

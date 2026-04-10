@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SDRIQStreamer</AssemblyName>
+    <RootNamespace>SDRIQStreamer.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="FlexLib_API_v4.1.5.39794\**" />
+    <Compile Remove="reference\**" />
+    <Compile Remove=".cursor\**" />
+    <Compile Remove="src\**" />
+    <Compile Remove="tests\**" />
+    <Compile Remove="tools\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="src\SmartSDRIQStreamer.FlexRadio\SmartSDRIQStreamer.FlexRadio.csproj" />
+    <ProjectReference Include="src\SmartSDRIQStreamer.CWSkimmer\SmartSDRIQStreamer.CWSkimmer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.12" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.12">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
+  </ItemGroup>
+</Project>

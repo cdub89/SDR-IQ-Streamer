@@ -1,0 +1,23 @@
+# Reference artifacts (SliceMaster/SDR-Bridge/CW Skimmer configs, logs, docs)
+# Not for distribution; keep repo tidy
+/reference/
+/FlexLib_API*/
+/SmartSDR-IQ-Streamer.MDC
+
+# Build outputs
+**/bin/
+**/obj/
+
+# Test outputs
+**/TestResults/
+
+# IDE/editor
+**/.vs/
+**/.vscode/
+*.user
+*.suo
+
+# Cursor
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**

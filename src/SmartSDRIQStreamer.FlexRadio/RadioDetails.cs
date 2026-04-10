@@ -1,0 +1,50 @@
+namespace SDRIQStreamer.FlexRadio;
+
+public enum RequestStreamResult
+{
+    Success,
+    StreamAlreadyActive,
+    NoChannelAssigned,
+    Timeout
+}
+
+public sealed record PanadapterInfo(
+    uint   StreamId,
+    double CenterFreqMHz,
+    int    DAXIQChannel,
+    string ClientStation)
+{
+    private long CenterFreqHz => (long)Math.Round(CenterFreqMHz * 1_000_000d);
+
+    public string DisplayLabel =>
+        $"Center Frequency {CenterFreqHz} Hz  (DAX-IQ ch: {(DAXIQChannel > 0 ? DAXIQChannel.ToString() : "–")})";
+}
+
+public sealed record SliceInfo(
+    string Letter,
+    string Mode,
+    double FreqMHz,
+    uint   PanadapterStreamId,
+    string ClientStation)
+{
+    public string DisplayLabel => $"Slice {Letter}  {Mode}  {FreqMHz:F6} MHz";
+}
+
+public sealed record DaxIQStreamInfo(
+    int    DAXIQChannel,
+    int    SampleRate,
+    bool   IsActive,
+    double CenterFreqMHz)
+{
+    public bool IsSkimmerRunning { get; init; }
+
+    private long CenterFreqHz => (long)Math.Round(CenterFreqMHz * 1_000_000d);
+
+    public string DisplayLabel =>
+        CenterFreqMHz > 0
+            ? $"DAX-IQ ch {DAXIQChannel}  Center Frequency {CenterFreqHz} Hz  {SampleRate / 1000} kHz  {(IsActive ? "Active" : "Inactive")}"
+            : $"DAX-IQ ch {DAXIQChannel}  No Panadapter  {SampleRate / 1000} kHz  {(IsActive ? "Active" : "Inactive")}";
+
+    public string SkimmerRowLabel =>
+        $"DAX-IQ ch {DAXIQChannel}  {(IsActive ? "Active" : "Off")}";
+}
