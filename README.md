@@ -8,15 +8,13 @@ This project is a work in progress. Development status is tracked in the roadmap
 
 ## Quick Start
 
-### Prerequisites
+### Release Package (for alpha testers)
 
-- Windows 10/11
-- .NET SDK 8.x
-- SmartSDR + DAX installed and running
-- CW Skimmer installed
-- FLEX-6x00/8x00 radio reachable on local network
-- A local radio is required in the current implementation. VPN and SmartLink support are planned for a future release.
-- FlexLib API package downloaded and extracted to `FlexLib_API_v4.1.5.39794` in the project root (required to build).
+- Download the current release zip and run the included `SDRIQStreamer.exe`. There is nothing to install.
+- The current alpha publish is a self-contained `win-x64` build, so .NET runtime installation is not required on the test PC.
+- Runtime prerequisites still apply: SmartSDR + DAX and CW Skimmer must already be installed.
+- `FlexLib_API_v4.1.5.39794` is required to build from source, but is not required on a tester machine using the published release zip.
+
 
 ### First-Time Setup / Get Started
 
@@ -25,6 +23,16 @@ This project is a work in progress. Development status is tracked in the roadmap
 3. In **Available Radios**, select your radio and click **Connect**.
 4. Click **Launch** to start CW Skimmer. In CW Skimmer, open **View > Settings** and verify the **Radio**, **Audio**, and **Operator** tabs for your station.
 5. In the CW Skimmer toolbar, click **Start Radio** to begin decoding.
+
+### Development Prerequisites
+
+- Windows 10/11
+- .NET SDK 8.x
+- SmartSDR + DAX installed and running
+- CW Skimmer installed
+- FLEX-6x00/8x00 radio reachable on local network
+- A local radio is required in the current implementation. VPN and SmartLink support are planned for a future release.
+- FlexLib API package downloaded and extracted to `FlexLib_API_v4.1.5.39794` in the project root (required to build).
 
 ### Build
 
