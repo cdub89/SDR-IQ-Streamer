@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -24,10 +25,11 @@ public partial class MainWindowViewModel : ObservableObject
     // ── Discovered radios ─────────────────────────────────────────────────────
 
     public ObservableCollection<DiscoveredRadio> Radios { get; } = new();
+    public ObservableCollection<RadioConnectTarget> ConnectTargets { get; } = new();
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor("ConnectCommand")]
-    private DiscoveredRadio? _selectedRadio;
+    private RadioConnectTarget? _selectedConnectTarget;
 
     [ObservableProperty]
     private string _statusText = "Discovering…";
@@ -46,6 +48,10 @@ public partial class MainWindowViewModel : ObservableObject
 
     /// <summary>Hierarchical view: client → panadapter(s) → slice(s).</summary>
     public ObservableCollection<ClientGroup> ClientGroups { get; } = new();
+    public IEnumerable<ClientGroup> VisibleClientGroups =>
+        string.IsNullOrWhiteSpace(SelectedControlStation)
+            ? ClientGroups
+            : ClientGroups.Where(g => string.Equals(g.Station, SelectedControlStation, StringComparison.OrdinalIgnoreCase));
 
     public ObservableCollection<DaxIQStreamInfo> DaxIQStreams { get; } = new();
 
@@ -59,8 +65,9 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private string _streamRequestStatus = string.Empty;
 
-    /// <summary>Station name of our own connected client — used to gate the Stream button.</summary>
+    /// <summary>Station name of our own connected client.</summary>
     public string OwnClientStation { get; private set; } = string.Empty;
+    public string SelectedControlStation { get; private set; } = string.Empty;
 
     // ── CW Skimmer ────────────────────────────────────────────────────────────
 
@@ -73,6 +80,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> FooterStatusLines { get; } = new();
     private readonly Dictionary<int, string> _lastCwDevicePreviewByChannel = new();
+    private CancellationTokenSource? _sliceSyncCts;
+    private CancellationTokenSource? _loSyncCts;
 
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
@@ -127,17 +136,22 @@ public partial class MainWindowViewModel : ObservableObject
                 RefreshDaxStreamPanBindings();
                 RefreshAllPanStreamSummaries();
                 if (!running)
-                    AddFooterStatus("CW Skimmer stopped.");
+                    AddSkimmerStatus("CW Skimmer stopped.");
             });
 
         // Click→tune: when user clicks a signal in CW Skimmer, tune the associated slice
         _launcher.FrequencyClicked += freqKhz =>
         {
-            var slice = _connection.Slices.FirstOrDefault();
+            var slice = GetPreferredSliceForTune();
             if (slice is null) return;
             double freqMHz = freqKhz / 1000.0;
             _ = _connection.SetSliceFrequencyAsync(slice, freqMHz);
+            UIPost(() => AddTelnetStatus(
+                $"Click tune (Skimmer): {freqMHz:F6} MHz -> Slice {slice.Letter} ({slice.ClientStation})"));
         };
+
+        _launcher.TelnetStatusChanged += message =>
+            UIPost(() => AddTelnetStatus(message));
 
         // Load persisted settings
         CwSkimmerExePath = _settings.CwSkimmerExePath;
@@ -147,11 +161,23 @@ public partial class MainWindowViewModel : ObservableObject
 
     // ── Discovery ─────────────────────────────────────────────────────────────
 
-    private void OnRadioAdded(DiscoveredRadio radio)   => UIPost(() => { Radios.Add(radio); StatusText = string.Empty; });
+    private void OnRadioAdded(DiscoveredRadio radio) => UIPost(() =>
+    {
+        var existing = Radios.FirstOrDefault(r => r.Serial == radio.Serial);
+        if (existing is null)
+            Radios.Add(radio);
+        else
+            Radios[Radios.IndexOf(existing)] = radio;
+
+        RebuildConnectTargets();
+        StatusText = Radios.Count == 0 ? "No radios found" : string.Empty;
+    });
+
     private void OnRadioRemoved(DiscoveredRadio radio) => UIPost(() =>
     {
         var m = Radios.FirstOrDefault(r => r.Serial == radio.Serial);
         if (m is not null) Radios.Remove(m);
+        RebuildConnectTargets();
         StatusText = Radios.Count == 0 ? "No radios found" : string.Empty;
     });
 
@@ -160,13 +186,15 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanConnect))]
     private async Task ConnectAsync()
     {
-        if (SelectedRadio is null) return;
-        ConnectionStatus = $"Connecting to {SelectedRadio.Model}…";
-        bool ok = await _connection.ConnectAsync(SelectedRadio);
+        if (SelectedConnectTarget is null) return;
+
+        SetSelectedControlStation(SelectedConnectTarget.Station);
+        ConnectionStatus = $"Connecting to {SelectedConnectTarget.Radio.Model} ({SelectedControlStation})…";
+        bool ok = await _connection.ConnectAsync(SelectedConnectTarget.Radio);
         if (!ok) ConnectionStatus = "Connection failed.";
     }
 
-    private bool CanConnect()    => SelectedRadio is not null && !IsConnected;
+    private bool CanConnect() => SelectedConnectTarget is not null && !IsConnected;
 
     [RelayCommand(CanExecute = nameof(CanDisconnect))]
     private void Disconnect() => _connection.Disconnect();
@@ -183,6 +211,7 @@ public partial class MainWindowViewModel : ObservableObject
                 ConnectionStatus = $"Connected: {_connection.ConnectedModel}  {_connection.Versions}";
                 OwnClientStation = _connection.OwnClientStation;
                 OnPropertyChanged(nameof(OwnClientStation));
+                EnsureSelectedControlStation();
 
                 foreach (var p in _connection.Panadapters)
                     AddPan(p);
@@ -193,13 +222,15 @@ public partial class MainWindowViewModel : ObservableObject
 
                 _radioAvgDaxKbps = _connection.AvgDAXKbps;
                 UpdateDisplayedDaxKbps();
-                AddFooterStatus($"Connected to {_connection.ConnectedModel}.");
+                AddStreamerStatus($"Connected to {_connection.ConnectedModel}.");
+                AddStreamerStatus($"Control station: {SelectedControlStation}");
             }
             else
             {
                 ConnectionStatus = string.Empty;
                 OwnClientStation = string.Empty;
                 OnPropertyChanged(nameof(OwnClientStation));
+                SetSelectedControlStation(string.Empty);
                 StreamRequestStatus = string.Empty;
                 ClientGroups.Clear();
                 DaxIQStreams.Clear();
@@ -207,7 +238,7 @@ public partial class MainWindowViewModel : ObservableObject
                 AvgDAXKbps = 0;
                 DaxStreamingSummary = "DAX Streaming : 0.0 Mbps (0 kbps)";
                 _lastCwDevicePreviewByChannel.Clear();
-                AddFooterStatus("Disconnected.");
+                AddStreamerStatus("Disconnected.");
             }
         });
     }
@@ -245,10 +276,12 @@ public partial class MainWindowViewModel : ObservableObject
         RefreshCwSkimmerDeviceInfo(normalized.DAXIQChannel);
 
         // Sync LO frequency with CW Skimmer if it's running and the centre freq changed
-        if (IsCwSkimmerRunning && normalized.CenterFreqMHz > 0)
+        if (IsCwSkimmerRunning &&
+            normalized.CenterFreqMHz > 0 &&
+            IsOwnStationPanChannel(normalized.DAXIQChannel))
         {
             var freqHz = (long)(normalized.CenterFreqMHz * 1_000_000);
-            _ = _launcher.UpdateLoFreqAsync(freqHz);
+            QueueLoSync(freqHz);
         }
     }
 
@@ -263,7 +296,7 @@ public partial class MainWindowViewModel : ObservableObject
             return;
 
         _lastCwDevicePreviewByChannel[daxIqChannel] = status;
-        AddFooterStatus(status);
+        AddSkimmerStatus(status);
     }
 
     // ── Client / pan / slice grouping ─────────────────────────────────────────
@@ -278,6 +311,7 @@ public partial class MainWindowViewModel : ObservableObject
             group.Panadapters.Add(panGroup);
         }
         RefreshDaxStreamPanBindings();
+        OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
     private void RemovePan(PanadapterInfo pan)
@@ -288,6 +322,7 @@ public partial class MainWindowViewModel : ObservableObject
         if (entry is not null) group.Panadapters.Remove(entry);
         if (group.Panadapters.Count == 0) ClientGroups.Remove(group);
         RefreshDaxStreamPanBindings();
+        OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
     private void UpdatePan(PanadapterInfo pan)
@@ -301,6 +336,7 @@ public partial class MainWindowViewModel : ObservableObject
             UpdatePanStreamSummary(entry);
         }
         RefreshDaxStreamPanBindings();
+        OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
     private void AddSlice(SliceInfo slice)
@@ -313,17 +349,24 @@ public partial class MainWindowViewModel : ObservableObject
             var vm = new SliceViewModel(slice);
             panEntry.Slices.Add(vm);
         }
+        OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
     private void RemoveSlice(SliceInfo slice)
     {
         var group = ClientGroups.FirstOrDefault(g => g.Station == slice.ClientStation);
         if (group is null) return;
+        var removed = false;
         foreach (var panEntry in group.Panadapters)
         {
             var match = panEntry.Slices.FirstOrDefault(s => s.Slice.Letter == slice.Letter);
-            if (match is not null) { panEntry.Slices.Remove(match); return; }
+            if (match is null) continue;
+            panEntry.Slices.Remove(match);
+            removed = true;
+            break;
         }
+        if (removed)
+            OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
     private void UpdateSlice(SliceInfo slice)
@@ -337,8 +380,8 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         // Keep CW Skimmer's main window VFO in sync with the slice frequency
-        if (IsCwSkimmerRunning && slice.FreqMHz > 0)
-            _ = _launcher.UpdateSliceFreqAsync(slice.FreqMHz);
+        if (IsCwSkimmerRunning && slice.FreqMHz > 0 && IsOwnStationSlice(slice))
+            QueueSliceSync(slice.FreqMHz);
     }
 
     private ClientGroup GetOrCreateClientGroup(string station)
@@ -347,6 +390,7 @@ public partial class MainWindowViewModel : ObservableObject
         if (existing is not null) return existing;
         var newGroup = new ClientGroup(station);
         ClientGroups.Add(newGroup);
+        OnPropertyChanged(nameof(VisibleClientGroups));
         return newGroup;
     }
 
@@ -450,7 +494,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanLaunchCwSkimmerForChannel))]
     private async Task LaunchCwSkimmerForChannelAsync(DaxIQStreamInfo? stream)
     {
-        await _cwSkimmerWorkflow.LaunchForChannelAsync(stream, CwSkimmerExePath, AddFooterStatus);
+        await _cwSkimmerWorkflow.LaunchForChannelAsync(stream, CwSkimmerExePath, AddSkimmerStatus);
     }
 
     private bool CanLaunchCwSkimmerForChannel(DaxIQStreamInfo? stream) =>
@@ -459,7 +503,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStopCwSkimmerForChannel))]
     private void StopCwSkimmerForChannel(DaxIQStreamInfo? stream)
     {
-        _cwSkimmerWorkflow.StopForChannel(stream, AddFooterStatus);
+        _cwSkimmerWorkflow.StopForChannel(stream, AddSkimmerStatus);
         LaunchCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
         StopCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
         RefreshDaxStreamPanBindings();
@@ -485,6 +529,143 @@ public partial class MainWindowViewModel : ObservableObject
     private void AddFooterStatus(string message)
     {
         FooterStatusText = _footerStatusBuffer.Add(message);
+    }
+
+    private void AddStreamerStatus(string message) => AddFooterStatus($"[STREAMER] {message}");
+    private void AddSkimmerStatus(string message) => AddFooterStatus($"[SKIMMER] {message}");
+    private void AddTelnetStatus(string message) => AddFooterStatus($"[TELNET] {message}");
+
+    private void QueueLoSync(long freqHz)
+    {
+        var cts = ReplaceSyncCts(ref _loSyncCts);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(120, cts.Token);
+                await _launcher.UpdateLoFreqAsync(freqHz);
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private void QueueSliceSync(double freqMHz)
+    {
+        var cts = ReplaceSyncCts(ref _sliceSyncCts);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(120, cts.Token);
+                await _launcher.UpdateSliceFreqAsync(freqMHz);
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
+    private static CancellationTokenSource ReplaceSyncCts(ref CancellationTokenSource? field)
+    {
+        var next = new CancellationTokenSource();
+        var previous = field;
+        field = next;
+
+        if (previous is not null)
+        {
+            try { previous.Cancel(); } catch { }
+            previous.Dispose();
+        }
+
+        return next;
+    }
+
+    private SliceInfo? GetPreferredSliceForTune()
+    {
+        var ownSlice = _connection.Slices.FirstOrDefault(IsOwnStationSlice);
+        return ownSlice ?? _connection.Slices.FirstOrDefault();
+    }
+
+    private bool IsOwnStationSlice(SliceInfo slice)
+    {
+        if (string.IsNullOrWhiteSpace(SelectedControlStation))
+            return false;
+
+        return string.Equals(slice.ClientStation, SelectedControlStation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsOwnStationPanChannel(int daxIqChannel)
+    {
+        if (string.IsNullOrWhiteSpace(SelectedControlStation))
+            return false;
+
+        return _connection.Panadapters.Any(p =>
+            p.DAXIQChannel == daxIqChannel &&
+            string.Equals(p.ClientStation, SelectedControlStation, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void EnsureSelectedControlStation()
+    {
+        if (string.Equals(SelectedControlStation, RadioConnectTarget.UnknownStation, StringComparison.OrdinalIgnoreCase))
+            SetSelectedControlStation(string.Empty);
+
+        if (!string.IsNullOrWhiteSpace(SelectedControlStation))
+            return;
+
+        if (!string.IsNullOrWhiteSpace(OwnClientStation))
+        {
+            SetSelectedControlStation(OwnClientStation);
+            return;
+        }
+
+        SetSelectedControlStation(_connection.Slices
+            .Select(s => s.ClientStation)
+            .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))
+            ?? string.Empty);
+    }
+
+    private void SetSelectedControlStation(string station)
+    {
+        if (string.Equals(SelectedControlStation, station, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        SelectedControlStation = station;
+        OnPropertyChanged(nameof(SelectedControlStation));
+        OnPropertyChanged(nameof(VisibleClientGroups));
+    }
+
+    private void RebuildConnectTargets()
+    {
+        var selected = SelectedConnectTarget;
+        ConnectTargets.Clear();
+
+        foreach (var radio in Radios.OrderBy(r => r.Model).ThenBy(r => r.Nickname).ThenBy(r => r.Serial))
+        {
+            var stations = radio.Stations
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (stations.Length == 0)
+            {
+                ConnectTargets.Add(new RadioConnectTarget(radio, RadioConnectTarget.UnknownStation));
+                continue;
+            }
+
+            foreach (var station in stations)
+                ConnectTargets.Add(new RadioConnectTarget(radio, station));
+        }
+
+        if (selected is null)
+        {
+            if (ConnectTargets.Count > 0)
+                SelectedConnectTarget = ConnectTargets[0];
+            return;
+        }
+
+        SelectedConnectTarget = ConnectTargets.FirstOrDefault(t =>
+            t.Radio.Serial == selected.Radio.Serial &&
+            string.Equals(t.Station, selected.Station, StringComparison.OrdinalIgnoreCase))
+            ?? ConnectTargets.FirstOrDefault();
     }
 
     private static void UIPost(System.Action action) => Dispatcher.UIThread.Post(action);

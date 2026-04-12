@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net;
 
 namespace SDRIQStreamer.FlexRadio;
@@ -12,7 +13,8 @@ public sealed record DiscoveredRadio(
     string Nickname,
     string Callsign,
     IPAddress IP,
-    string Status)
+    string Status,
+    IReadOnlyList<string> Stations)
 {
     /// <summary>
     /// A human-readable label suitable for display in a radio picker list.

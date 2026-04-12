@@ -1,5 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Channels;
+using System.Linq;
 
 namespace SDRIQStreamer.CWSkimmer;
 
@@ -20,44 +22,94 @@ namespace SDRIQStreamer.CWSkimmer;
 /// </summary>
 public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 {
+    private static readonly string s_diagPath = ResolveDiagPath();
+    private static readonly Channel<string> s_diagChannel = Channel.CreateUnbounded<string>(
+        new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+    private static readonly Task s_diagWriterTask = Task.Run(DrainDiagQueueAsync);
+
     private TcpClient?              _tcp;
     private NetworkStream?          _stream;
     private StreamWriter?           _writer;
     private CancellationTokenSource? _readCts;
     private Task?                   _readTask;
     private readonly SemaphoreSlim  _writeLock = new(1, 1);
+    private DateTime                _lastLoSyncStatusUtc;
+    private DateTime                _lastQsySyncStatusUtc;
+    private volatile bool           _isSessionReady;
 
-    public bool IsConnected => _tcp?.Connected ?? false;
+    public bool IsConnected => _tcp is not null && _stream is not null && _writer is not null && _isSessionReady;
 
+    public event Action<string>? StatusChanged;
     public event Action<double>? FrequencyClicked;
 
     public async Task ConnectAsync(string host, int port, string callsign, string password,
                                    CancellationToken ct = default)
     {
-        _tcp    = new TcpClient();
-        await _tcp.ConnectAsync(host, port, ct);
-        _stream = _tcp.GetStream();
+        var effectiveCallsign = string.IsNullOrWhiteSpace(callsign)
+            ? "SDRIQStreamer"
+            : callsign.Trim();
 
-        await PerformLoginAsync(_stream, callsign, password, ct);
-
-        _writer = new StreamWriter(_stream, new UTF8Encoding(false), leaveOpen: true)
+        LogDiag($"CONNECT start host={host} port={port} callsign={effectiveCallsign}");
+        EmitStatus($"Telnet connecting to {host}:{port}...");
+        try
         {
-            AutoFlush = true,
-            NewLine   = "\r\n",
-        };
+            _tcp    = new TcpClient();
+            await _tcp.ConnectAsync(host, port, ct);
+            _stream = _tcp.GetStream();
 
-        _readCts  = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _readTask = Task.Run(() => ReadLoopAsync(_stream, _readCts.Token));
+            await PerformLoginAsync(_stream, effectiveCallsign, password, ct);
+
+            _writer = new StreamWriter(_stream, new UTF8Encoding(false), leaveOpen: true)
+            {
+                AutoFlush = true,
+                NewLine   = "\r\n",
+            };
+
+            _readCts  = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _readTask = Task.Run(() => ReadLoopAsync(_stream, _readCts.Token));
+            _isSessionReady = true;
+            LogDiag("CONNECT success");
+            EmitStatus($"Telnet connected ({host}:{port}).");
+        }
+        catch (Exception ex)
+        {
+            _isSessionReady = false;
+            LogDiag($"CONNECT error {ex.GetType().Name}: {ex.Message}");
+            EmitStatus($"Telnet connect failed: {ex.Message}");
+            throw;
+        }
     }
 
     public async Task SendLoFreqAsync(long freqHz, CancellationToken ct = default)
     {
-        if (_writer is null || !IsConnected) return;
+        if (_writer is null || !_isSessionReady)
+        {
+            LogDiag($"TX skipped SKIMMER/LO_FREQ {freqHz} (writer not ready)");
+            return;
+        }
 
         await _writeLock.WaitAsync(ct);
         try
         {
-            await _writer.WriteLineAsync($"SKIMMER/LO_FREQ {freqHz}");
+            var command = $"SKIMMER/LO_FREQ {freqHz}";
+            await _writer.WriteLineAsync(command);
+            LogDiag($"TX {command}");
+            EmitThrottledSyncStatus(
+                ref _lastLoSyncStatusUtc,
+                TimeSpan.FromSeconds(2),
+                $"LO sync: {freqHz} Hz");
+        }
+        catch (Exception ex)
+        {
+            LogDiag($"TX error SKIMMER/LO_FREQ {freqHz}: {ex.Message}");
+            EmitStatus($"Telnet send failed (LO_FREQ): {ex.Message}");
+            MarkDisconnected();
+            throw;
         }
         finally
         {
@@ -67,14 +119,31 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     public async Task SendQsyAsync(double freqKhz, CancellationToken ct = default)
     {
-        if (_writer is null || !IsConnected) return;
+        if (_writer is null || !_isSessionReady)
+        {
+            LogDiag($"TX skipped SKIMMER/QSY {freqKhz:F3} (writer not ready)");
+            return;
+        }
 
         await _writeLock.WaitAsync(ct);
         try
         {
             // CW Skimmer expects frequency in kHz with up to 3 decimal places
-            await _writer.WriteLineAsync(
-                $"SKIMMER/QSY {freqKhz.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}");
+            var command = $"SKIMMER/QSY {freqKhz.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}";
+            await _writer.WriteLineAsync(command);
+            LogDiag($"TX {command}");
+            var freqMHz = freqKhz / 1000.0;
+            EmitThrottledSyncStatus(
+                ref _lastQsySyncStatusUtc,
+                TimeSpan.FromSeconds(2),
+                $"QSY sync (VFO): {freqMHz.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)} MHz");
+        }
+        catch (Exception ex)
+        {
+            LogDiag($"TX error SKIMMER/QSY {freqKhz:F3}: {ex.Message}");
+            EmitStatus($"Telnet send failed (QSY): {ex.Message}");
+            MarkDisconnected();
+            throw;
         }
         finally
         {
@@ -84,6 +153,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     public async Task DisconnectAsync()
     {
+        LogDiag("DISCONNECT start");
+        EmitStatus("Telnet disconnecting...");
         _readCts?.Cancel();
         if (_readTask is not null)
         {
@@ -94,11 +165,14 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         _stream?.Dispose();
         _tcp?.Dispose();
 
+        _isSessionReady = false;
         _writer   = null;
         _stream   = null;
         _tcp      = null;
         _readCts  = null;
         _readTask = null;
+        LogDiag("DISCONNECT complete");
+        EmitStatus("Telnet disconnected.");
     }
 
     public async ValueTask DisposeAsync() => await DisconnectAsync();
@@ -126,10 +200,14 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
                 text.Append(StripIac(buf.AsSpan(0, n)));
                 var s = text.ToString();
 
+                if (ContainsAny(s, "authentication failed", "access violation"))
+                    throw new IOException("CW Skimmer rejected telnet authentication.");
+
                 if (!sentCallsign &&
-                    s.Contains("callsign", StringComparison.OrdinalIgnoreCase))
+                    ContainsAny(s, "callsign", "login"))
                 {
                     await WriteLineToStream(stream, callsign, ct);
+                    LogDiag($"LOGIN callsign prompt -> sent callsign={callsign}");
                     sentCallsign = true;
                     text.Clear();
                 }
@@ -137,18 +215,29 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
                          s.Contains("password", StringComparison.OrdinalIgnoreCase))
                 {
                     await WriteLineToStream(stream, password, ct);
-                    break; // Login complete
+                    LogDiag("LOGIN password prompt -> sent password");
+                    text.Clear();
                 }
                 else if (sentCallsign)
                 {
+                    if (LooksLikeSessionReady(s))
+                    {
+                        LogDiag("LOGIN handshake complete");
+                        return;
+                    }
+
                     // No password prompt — login may not require one; wait briefly
-                    loginCts.CancelAfter(TimeSpan.FromSeconds(2));
+                    loginCts.CancelAfter(TimeSpan.FromSeconds(4));
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            // Timeout after credentials sent — assume login complete
+            if (!sentCallsign)
+                throw;
+
+            // Timeout after credentials sent — treat as likely success for tolerant servers.
+            LogDiag("LOGIN timeout/cancelled after credentials (treated as success)");
         }
     }
 
@@ -168,16 +257,46 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             while (!ct.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(ct);
-                if (line is null) break;
+                if (line is null)
+                {
+                    LogDiag("RX remote-closed connection");
+                    EmitStatus("Telnet connection closed by CW Skimmer.");
+                    MarkDisconnected();
+                    break;
+                }
                 ProcessLine(line);
             }
         }
-        catch (OperationCanceledException) { }
-        catch (IOException) { }
+        catch (OperationCanceledException)
+        {
+            LogDiag("RX cancelled");
+            EmitStatus("Telnet receive loop cancelled.");
+        }
+        catch (IOException ex)
+        {
+            LogDiag($"RX io-error {ex.Message}");
+            EmitStatus($"Telnet receive error: {ex.Message}");
+            MarkDisconnected();
+        }
     }
 
     private void ProcessLine(string line)
     {
+        if (line.Contains("authentication failed", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("access violation", StringComparison.OrdinalIgnoreCase))
+        {
+            LogDiag($"RX auth-failed {line}");
+            EmitStatus("Telnet authentication failed by CW Skimmer.");
+            MarkDisconnected();
+            return;
+        }
+
+        if (line.Contains("Clicked on", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("SKIMMER/", StringComparison.OrdinalIgnoreCase))
+        {
+            LogDiag($"RX {line}");
+        }
+
         var freq = ParseClickedOn(line);
         if (freq.HasValue)
             FrequencyClicked?.Invoke(freq.Value);
@@ -226,4 +345,129 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         }
         return sb.ToString();
     }
+
+    private static void LogDiag(string message)
+    {
+        try
+        {
+            _ = s_diagWriterTask;
+            _ = s_diagChannel.Writer.TryWrite(
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}");
+        }
+        catch
+        {
+            // Diagnostics must never break runtime behavior.
+        }
+    }
+
+    private static async Task DrainDiagQueueAsync()
+    {
+        var reader = s_diagChannel.Reader;
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(s_diagPath)!);
+
+            while (await reader.WaitToReadAsync().ConfigureAwait(false))
+            {
+                var sb = new StringBuilder();
+                while (reader.TryRead(out var line))
+                {
+                    sb.AppendLine(line);
+                }
+
+                if (sb.Length > 0)
+                {
+                    await File.AppendAllTextAsync(s_diagPath, sb.ToString(), Encoding.UTF8)
+                              .ConfigureAwait(false);
+                }
+            }
+        }
+        catch
+        {
+            // Diagnostics must never break runtime behavior.
+        }
+    }
+
+    private static string ResolveDiagPath()
+    {
+        try
+        {
+            var fromBaseDir = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory));
+            if (fromBaseDir is not null)
+                return Path.Combine(fromBaseDir.FullName, "artifacts", "logs", "cwskimmer-telnet-client.log");
+
+            var fromCurrentDir = TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+            if (fromCurrentDir is not null)
+                return Path.Combine(fromCurrentDir.FullName, "artifacts", "logs", "cwskimmer-telnet-client.log");
+        }
+        catch
+        {
+            // Fall back to temp path below.
+        }
+
+        return Path.Combine(Path.GetTempPath(), "SDRIQStreamer", "cwskimmer-telnet-client.log");
+    }
+
+    private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
+    {
+        var current = start;
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.csproj")) ||
+                File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.slnx")))
+            {
+                return current;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    private void EmitStatus(string message)
+    {
+        try
+        {
+            StatusChanged?.Invoke(message);
+        }
+        catch
+        {
+            // Status listeners must never break runtime behavior.
+        }
+    }
+
+    private void MarkDisconnected()
+    {
+        try { _writer?.Dispose(); } catch { }
+        try { _stream?.Dispose(); } catch { }
+        try { _tcp?.Dispose(); } catch { }
+
+        _isSessionReady = false;
+        _writer = null;
+        _stream = null;
+        _tcp = null;
+    }
+
+    private void EmitThrottledSyncStatus(ref DateTime lastStatusUtc, TimeSpan minInterval, string message)
+    {
+        var now = DateTime.UtcNow;
+        if (now - lastStatusUtc < minInterval)
+            return;
+
+        lastStatusUtc = now;
+        EmitStatus(message);
+    }
+
+    private static bool ContainsAny(string text, params string[] markers)
+        => markers.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase));
+
+    private static bool LooksLikeSessionReady(string text)
+        => ContainsAny(text,
+            "to all de skimmer",
+            "de skimmer",
+            "clicked on",
+            "skimmer/",
+            "welcome");
 }

@@ -53,7 +53,7 @@ public sealed class CwSkimmerWorkflowService
             ExePath = exePath,
             ConnectDelaySeconds = _settings.ConnectDelaySeconds,
             LaunchDelaySeconds = _settings.LaunchDelaySeconds,
-            Callsign = _settings.Callsign,
+            Callsign = ResolveTelnetCallsign(),
             Operator = _settings.Operator,
             Location = _settings.Location,
             GridSquare = _settings.GridSquare,
@@ -108,6 +108,39 @@ public sealed class CwSkimmerWorkflowService
             .Take(12)
             .ToArray();
         return $"DAX IQ RX {channel} not found in WinMM list:\n{string.Join("\n", lines)}\n" +
-               "(Full log: %TEMP%\\SDRIQStreamer\\device-diagnostic.txt)";
+               "(Full log: artifacts\\cwskimmer\\ini\\device-diagnostic.txt)";
+    }
+
+    private string ResolveTelnetCallsign()
+    {
+        if (IsLikelyCallsign(_settings.Callsign))
+            return _settings.Callsign.Trim();
+
+        if (IsLikelyCallsign(_connection.OwnClientStation))
+            return _connection.OwnClientStation.Trim();
+
+        return "N0CALL";
+    }
+
+    private static bool IsLikelyCallsign(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length < 3 || trimmed.Length > 16)
+            return false;
+
+        bool hasLetter = false;
+        bool hasDigit = false;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsLetter(ch)) hasLetter = true;
+            else if (char.IsDigit(ch)) hasDigit = true;
+            else if (ch != '-' && ch != '/')
+                return false;
+        }
+
+        return hasLetter && hasDigit;
     }
 }

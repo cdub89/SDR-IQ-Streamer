@@ -8,6 +8,11 @@ public interface ICwSkimmerTelnetClient : IAsyncDisposable
     bool IsConnected { get; }
 
     /// <summary>
+    /// Emits key telnet lifecycle/status messages suitable for UI status display.
+    /// </summary>
+    event Action<string>? StatusChanged;
+
+    /// <summary>
     /// Fires when the user clicks on a signal in CW Skimmer.
     /// Argument is the clicked frequency in kHz.
     /// </summary>

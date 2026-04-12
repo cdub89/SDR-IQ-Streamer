@@ -10,7 +10,7 @@ namespace SDRIQStreamer.CWSkimmer;
 public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 {
     private static readonly string IniDir =
-        Path.Combine(Path.GetTempPath(), "SDRIQStreamer");
+        ResolveIniDir();
 
     private readonly CwSkimmerIniModelFactory _modelFactory;
     private readonly CwSkimmerIniWriter       _iniWriter;
@@ -39,6 +39,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
     public event Action<bool>?   RunningStateChanged;
     public event Action<double>? FrequencyClicked;
+    public event Action<string>? TelnetStatusChanged;
 
     public string LastDiagnostics { get; private set; } = string.Empty;
 
@@ -53,6 +54,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         _telnet       = telnet;
 
         _telnet.FrequencyClicked += freq => FrequencyClicked?.Invoke(freq);
+        _telnet.StatusChanged += message => TelnetStatusChanged?.Invoke(message);
     }
 
     public (string SignalDevice, int SignalIdx, string AudioDevice, int AudioIdx)?
@@ -272,6 +274,43 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             File.WriteAllText(Path.Combine(IniDir, "device-diagnostic.txt"), content);
         }
         catch (Exception ex) { LogNonFatal("Failed to write diagnostic log.", ex); }
+    }
+
+    private static string ResolveIniDir()
+    {
+        try
+        {
+            var fromBaseDir = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory));
+            if (fromBaseDir is not null)
+                return Path.Combine(fromBaseDir.FullName, "artifacts", "cwskimmer", "ini");
+
+            var fromCurrentDir = TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+            if (fromCurrentDir is not null)
+                return Path.Combine(fromCurrentDir.FullName, "artifacts", "cwskimmer", "ini");
+        }
+        catch
+        {
+            // Fall back to temp path below.
+        }
+
+        return Path.Combine(Path.GetTempPath(), "SDRIQStreamer");
+    }
+
+    private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
+    {
+        var current = start;
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.csproj")) ||
+                File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.slnx")))
+            {
+                return current;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
     }
 
     private void BeginTelnetDisconnect()

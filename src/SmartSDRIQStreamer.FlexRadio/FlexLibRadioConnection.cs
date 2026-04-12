@@ -210,8 +210,12 @@ public sealed class FlexLibRadioConnection : IRadioConnection
 
     public Task SetSliceFrequencyAsync(SliceInfo slice, double freqMHz)
     {
-        if (_flexSlices.TryGetValue(slice.Letter, out var slc))
-            slc.Freq = freqMHz;
+        var target = _flexSlices.Values.FirstOrDefault(s =>
+            string.Equals(s.Letter, slice.Letter, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(ResolveStation(s.ClientHandle), slice.ClientStation, StringComparison.OrdinalIgnoreCase));
+
+        if (target is not null)
+            target.Freq = freqMHz;
         return Task.CompletedTask;
     }
 
@@ -370,7 +374,13 @@ public sealed class FlexLibRadioConnection : IRadioConnection
         return new(iq.DAXIQChannel, iq.SampleRate, iq.IsActive, centerFreqMHz);
     }
 
-    private static string SliceKey(Slice slc) => slc.Letter ?? slc.GetHashCode().ToString();
+    private static string SliceKey(Slice slc)
+    {
+        var letter = string.IsNullOrWhiteSpace(slc.Letter)
+            ? slc.GetHashCode().ToString()
+            : slc.Letter!;
+        return $"{slc.ClientHandle:X8}:{letter}";
+    }
 
     private string ResolveStation(uint clientHandle)
     {

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using Flex.Smoothlake.FlexLib;
 
 namespace SDRIQStreamer.FlexRadio;
@@ -20,7 +22,7 @@ public sealed class FlexLibRadioDiscovery : IRadioDiscovery
     public void Start()
     {
         API.ProgramName = "SDRIQStreamer";
-        API.IsGUI = true;
+        API.IsGUI = false;
 
         API.RadioAdded += OnFlexRadioAdded;
         API.RadioRemoved += OnFlexRadioRemoved;
@@ -57,5 +59,20 @@ public sealed class FlexLibRadioDiscovery : IRadioDiscovery
             Nickname:  r.Nickname ?? string.Empty,
             Callsign:  r.Callsign ?? string.Empty,
             IP:        r.IP,
-            Status:    r.Status   ?? string.Empty);
+            Status:    r.Status   ?? string.Empty,
+            Stations:  ResolveStations(r));
+
+    private static IReadOnlyList<string> ResolveStations(Radio radio)
+    {
+        if (radio.GuiClients is null || radio.GuiClients.Count == 0)
+            return [];
+
+        return radio.GuiClients
+            .Select(c => c.Station?.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToArray();
+    }
 }

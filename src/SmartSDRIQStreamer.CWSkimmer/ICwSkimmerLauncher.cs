@@ -46,6 +46,11 @@ public interface ICwSkimmerLauncher
     event Action<double>? FrequencyClicked;
 
     /// <summary>
+    /// Emits key telnet lifecycle/status messages suitable for UI status display.
+    /// </summary>
+    event Action<string>? TelnetStatusChanged;
+
+    /// <summary>
     /// Writes the INI, optionally waits <see cref="CwSkimmerConfig.LaunchDelaySeconds"/>,
     /// then starts CwSkimmer.exe with <c>ini=&lt;path&gt;</c>.
     /// Connects the telnet client in the background after

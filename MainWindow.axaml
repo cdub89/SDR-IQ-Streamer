@@ -31,7 +31,7 @@
 
         <!-- Radio list header + action -->
         <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,2">
-            <TextBlock Grid.Column="0" Text="Available Radios" FontSize="11" Foreground="Gray"/>
+            <TextBlock Grid.Column="0" Text="Available Radio / Station Targets" FontSize="11" Foreground="Gray"/>
             <Button Grid.Column="1"
                     Content="Connect"
                     MinWidth="48"
@@ -49,18 +49,18 @@
                     Command="{Binding DisconnectCommand}"
                     IsVisible="{Binding IsConnected}"/>
         </Grid>
-        <ListBox ItemsSource="{Binding Radios}"
-                 SelectedItem="{Binding SelectedRadio}"
+        <ListBox ItemsSource="{Binding ConnectTargets}"
+                 SelectedItem="{Binding SelectedConnectTarget}"
                  SelectionMode="Single">
             <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="flex:DiscoveredRadio">
+                <DataTemplate x:DataType="local:RadioConnectTarget">
                     <TextBlock Text="{Binding DisplayLabel}" FontSize="12" Padding="2"/>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
 
         <!-- Client → Pan → Slice hierarchy (visible when connected) -->
-        <ItemsControl ItemsSource="{Binding ClientGroups}"
+        <ItemsControl ItemsSource="{Binding VisibleClientGroups}"
                       IsVisible="{Binding IsConnected}"
                       Margin="0,6,0,0">
             <ItemsControl.ItemTemplate>

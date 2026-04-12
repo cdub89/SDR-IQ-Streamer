@@ -9,75 +9,55 @@ namespace SDRIQStreamer.CWSkimmer;
 /// </summary>
 public sealed class CwSkimmerIniWriter
 {
+    private static readonly string[] s_ownedSectionOrder =
+    [
+        "Audio",
+        "Radio",
+        "Telnet",
+    ];
+
     /// <summary>
-    /// Generates the INI content and writes it to <paramref name="path"/>,
-    /// creating or overwriting the file.
+    /// Updates app-owned INI sections while preserving all other sections that
+    /// CW Skimmer manages (for example [Windows], [BandMap], and dialog state).
     /// </summary>
     public void Write(CwSkimmerIniModel model, string path)
     {
-        var cfg = model.Config;
-        var sb  = new StringBuilder();
+        var ownedSections = BuildOwnedSections(model);
+        var existingSections = File.Exists(path)
+            ? ParseSections(File.ReadAllLines(path))
+            : [];
 
-        // ── [Windows] ─────────────────────────────────────────────────────────
-        // Ensure CW Skimmer waterfall uses color mode by default.
-        sb.AppendLine("[Windows]");
-        sb.AppendLine("Colors=1");
-        sb.AppendLine();
+        var mergedSections = new List<IniSection>(existingSections.Count + s_ownedSectionOrder.Length);
+        var seenOwned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // ── [Audio] ───────────────────────────────────────────────────────────
-        sb.AppendLine("[Audio]");
-        sb.AppendLine($"WdmSignalDev={model.WdmSignalDevIndex}");
-        sb.AppendLine($"WdmAudioDev={model.WdmAudioDevIndex}");
-        sb.AppendLine("MmeSignalDev=0");
-        sb.AppendLine("MmeAudioDev=0");
-        sb.AppendLine("UseWdm=1");
-        sb.AppendLine("ShiftQ=0");
-        sb.AppendLine("SwapIQ=0");
-        sb.AppendLine();
+        foreach (var section in existingSections)
+        {
+            if (ownedSections.TryGetValue(section.Name, out var replacement))
+            {
+                mergedSections.Add(new IniSection(section.Name, replacement));
+                seenOwned.Add(section.Name);
+            }
+            else
+            {
+                mergedSections.Add(section);
+            }
+        }
 
-        // ── [Radio] ───────────────────────────────────────────────────────────
-        sb.AppendLine("[Radio]");
-        sb.AppendLine("SdrType=2");
-        sb.AppendLine($"Pitch={cfg.CwPitch}");
-        sb.AppendLine("EstimateIQBalance=1");
-        sb.AppendLine("CorrectIQBalance=1");
-        sb.AppendLine();
+        foreach (var sectionName in s_ownedSectionOrder)
+        {
+            if (seenOwned.Contains(sectionName)) continue;
+            if (ownedSections.TryGetValue(sectionName, out var lines))
+                mergedSections.Add(new IniSection(sectionName, lines));
+        }
 
-        // ── [sdrSR] ───────────────────────────────────────────────────────────
-        // SdrType=2 in [Radio] selects SoftRock, which reads from [sdrSR].
-        sb.AppendLine("[sdrSR]");
-        sb.AppendLine($"signalrate={model.SampleRateHz}");
-        sb.AppendLine($"centerfreq={model.CenterFreqHz}");
-        sb.AppendLine("centeroffset=0");
-        sb.AppendLine("rigno=0");
-        sb.AppendLine();
-
-        // ── [Recorder] ────────────────────────────────────────────────────────
-        sb.AppendLine("[Recorder]");
-        if (!string.IsNullOrEmpty(cfg.IqWavDir))
-            sb.AppendLine($"WavDir={cfg.IqWavDir}");
-        sb.AppendLine("Visible=0");
-        sb.AppendLine("Loop=0");
-        sb.AppendLine($"WavCall={cfg.Callsign}");
-        sb.AppendLine($"WavOper={cfg.Operator}");
-        sb.AppendLine($"WavQTH={cfg.Location}");
-        sb.AppendLine($"WavGrid={cfg.GridSquare}");
-        sb.AppendLine();
-
-        // ── [Telnet] ──────────────────────────────────────────────────────────
-        sb.AppendLine("[Telnet]");
-        sb.AppendLine($"Port={cfg.TelnetPort}");
-        sb.AppendLine($"PasswordRequired={(cfg.TelnetPasswordRequired ? 1 : 0)}");
-        sb.AppendLine($"Password={cfg.TelnetPassword}");
-        sb.AppendLine("CqOnly=0");
-        sb.AppendLine("AllowAnn=1");
-        sb.AppendLine("AnnUserOnly=0");
-        sb.AppendLine("AnnUser=");
-        sb.AppendLine("TelnetSrvEnabled=1");
-        sb.AppendLine("UdpSourceName=CW Skimmer");
-        sb.AppendLine("UdpAddress=127.0.0.1");
-        sb.AppendLine("UdpPort=13064");
-        sb.AppendLine("UdpEnabled=0");
+        var sb = new StringBuilder();
+        foreach (var section in mergedSections)
+        {
+            sb.Append('[').Append(section.Name).AppendLine("]");
+            foreach (var line in section.Lines)
+                sb.AppendLine(line);
+            sb.AppendLine();
+        }
 
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
@@ -85,4 +65,91 @@ public sealed class CwSkimmerIniWriter
 
         File.WriteAllText(path, sb.ToString());
     }
+
+    private static Dictionary<string, List<string>> BuildOwnedSections(CwSkimmerIniModel model)
+    {
+        var cfg = model.Config;
+
+        return new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Audio"] =
+            [
+                $"WdmSignalDev={model.WdmSignalDevIndex}",
+                $"WdmAudioDev={model.WdmAudioDevIndex}",
+                "MmeSignalDev=0",
+                "MmeAudioDev=0",
+                "UseWdm=1",
+                "ShiftQ=0",
+                "SwapIQ=0",
+            ],
+            ["Radio"] =
+            [
+                "SdrType=2",
+                $"Pitch={cfg.CwPitch}",
+                "EstimateIQBalance=1",
+                "CorrectIQBalance=1",
+            ],
+            ["Telnet"] =
+            [
+                $"Port={cfg.TelnetPort}",
+                $"PasswordRequired={(cfg.TelnetPasswordRequired ? 1 : 0)}",
+                $"Password={cfg.TelnetPassword}",
+                "CqOnly=0",
+                "AllowAnn=1",
+                "AnnUserOnly=0",
+                "AnnUser=",
+                "TelnetSrvEnabled=1",
+                "UdpSourceName=CW Skimmer",
+                "UdpAddress=127.0.0.1",
+                "UdpPort=13064",
+                "UdpEnabled=0",
+            ],
+        };
+    }
+
+    private static List<IniSection> ParseSections(string[] lines)
+    {
+        var sections = new List<IniSection>();
+        string? currentName = null;
+        var currentLines = new List<string>();
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (TryParseSectionHeader(line, out var sectionName))
+            {
+                if (!string.IsNullOrWhiteSpace(currentName))
+                    sections.Add(new IniSection(currentName, [.. currentLines]));
+
+                currentName = sectionName;
+                currentLines.Clear();
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(currentName))
+                continue;
+
+            if (line.Length == 0)
+                continue;
+
+            currentLines.Add(line);
+        }
+
+        if (!string.IsNullOrWhiteSpace(currentName))
+            sections.Add(new IniSection(currentName, [.. currentLines]));
+
+        return sections;
+    }
+
+    private static bool TryParseSectionHeader(string line, out string sectionName)
+    {
+        sectionName = string.Empty;
+        if (line.Length < 3 || line[0] != '[' || line[^1] != ']')
+            return false;
+
+        sectionName = line[1..^1].Trim();
+        return sectionName.Length > 0;
+    }
+
+    private sealed record IniSection(string Name, IReadOnlyList<string> Lines);
 }

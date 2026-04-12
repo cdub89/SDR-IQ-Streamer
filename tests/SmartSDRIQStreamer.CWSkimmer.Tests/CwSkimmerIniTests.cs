@@ -47,12 +47,12 @@ public sealed class CwSkimmerIniWriterTests
     // ── [Audio] section ───────────────────────────────────────────────────────
 
     [Fact]
-    public void Write_WindowsSection_EnablesColorWaterfall()
+    public void Write_DoesNotInjectWindowsSection_WhenMissing()
     {
         var text = WriteToString(MakeModel());
 
-        Assert.Contains("[Windows]", text);
-        Assert.Contains("Colors=1", text);
+        Assert.DoesNotContain("[Windows]", text);
+        Assert.DoesNotContain("Colors=1", text);
     }
 
     [Fact]
@@ -80,41 +80,7 @@ public sealed class CwSkimmerIniWriterTests
         Assert.Contains("Pitch=600",  text);
     }
 
-    // ── [sdrSR] section ──────────────────────────────────────────────────────
-
-    [Fact]
-    public void Write_SdrSRSection_SignalRateAndCenterFreq()
-    {
-        var text = WriteToString(MakeModel(sampleRate: 48000, centerFreq: 14_048_441L));
-
-        Assert.Contains("[sdrSR]",                text);
-        Assert.Contains("signalrate=48000",       text);
-        Assert.Contains("centerfreq=14048441",    text);
-    }
-
-    [Fact]
-    public void Write_SdrSRSection_96kSampleRate()
-    {
-        var text = WriteToString(MakeModel(sampleRate: 96000, centerFreq: 7_040_000L));
-
-        Assert.Contains("signalrate=96000",   text);
-        Assert.Contains("centerfreq=7040000", text);
-    }
-
-    // ── [Recorder] section ────────────────────────────────────────────────────
-
-    [Fact]
-    public void Write_RecorderSection_StationInfo()
-    {
-        var text = WriteToString(MakeModel());
-
-        Assert.Contains("[Recorder]",      text);
-        Assert.Contains("WavCall=WX7V",    text);
-        Assert.Contains("WavOper=Chris",   text);
-        Assert.Contains("WavQTH=Dallas",   text);
-        Assert.Contains("WavGrid=EM12OU",  text);
-        Assert.Contains(@"WavDir=C:\IQ-Wav", text);
-    }
+    // [sdrSR] and [Recorder] are CW Skimmer-owned and intentionally preserved.
 
     // ── [Telnet] section ──────────────────────────────────────────────────────
 
@@ -146,15 +112,62 @@ public sealed class CwSkimmerIniWriterTests
     // ── Section ordering ──────────────────────────────────────────────────────
 
     [Fact]
-    public void Write_SectionOrder_AudioBeforeRadioBeforeSdrSR()
+    public void Write_SectionOrder_AudioBeforeRadioBeforeTelnet()
     {
         var text  = WriteToString(MakeModel());
         int audio = text.IndexOf("[Audio]", StringComparison.Ordinal);
         int radio = text.IndexOf("[Radio]", StringComparison.Ordinal);
-        int sdr   = text.IndexOf("[sdrSR]", StringComparison.Ordinal);
+        int telnet = text.IndexOf("[Telnet]", StringComparison.Ordinal);
 
         Assert.True(audio < radio, "[Audio] should precede [Radio]");
-        Assert.True(radio < sdr,   "[Radio] should precede [sdrSR]");
+        Assert.True(radio < telnet,   "[Radio] should precede [Telnet]");
+    }
+
+    [Fact]
+    public void Write_PreservesWindowsAndRecorderSections_WhenAlreadyPresent()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, """
+[Windows]
+Left=418
+Top=601
+Width=546
+Height=416
+Colors=1
+
+[Recorder]
+WavCall=OLDCALL
+WavOper=Old Name
+
+[Audio]
+WdmSignalDev=1
+WdmAudioDev=2
+""");
+
+            var writer = new CwSkimmerIniWriter();
+            writer.Write(MakeModel(), path);
+            var text = File.ReadAllText(path);
+
+            Assert.Contains("[Windows]", text);
+            Assert.Contains("Left=418", text);
+            Assert.Contains("Top=601", text);
+            Assert.Contains("Width=546", text);
+            Assert.Contains("Height=416", text);
+
+            Assert.Contains("[Recorder]", text);
+            Assert.Contains("WavCall=OLDCALL", text);
+            Assert.Contains("WavOper=Old Name", text);
+
+            Assert.Contains("WdmSignalDev=8", text);
+            Assert.Contains("WdmAudioDev=14", text);
+            Assert.DoesNotContain("[sdrSR]", text);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
