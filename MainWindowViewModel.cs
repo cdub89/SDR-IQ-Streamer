@@ -16,6 +16,7 @@ namespace SDRIQStreamer.App;
 public partial class MainWindowViewModel : ObservableObject
 {
     private static readonly object s_streamerLogSync = new();
+    private static readonly object s_spotPayloadLogSync = new();
     private readonly IRadioDiscovery   _discovery;
     private readonly IRadioConnection  _connection;
     private readonly ICwSkimmerLauncher _launcher;
@@ -548,27 +549,35 @@ public partial class MainWindowViewModel : ObservableObject
             commentParts.Add(spot.Comment);
 
         var comment = commentParts.Count == 0 ? null : string.Join(" | ", commentParts);
-        var sourceIdentity = ResolveSpotSourceIdentity(spot);
+        var sourceBaseCall = ResolveSourceBaseCall(spot.Spotter);
+        var sourceIdentity = ResolveSpotSourceIdentity(sourceBaseCall);
 
         var radioSpot = new RadioSpotInfo(
             Callsign: spot.Callsign,
             RxFrequencyMHz: spot.FrequencyKhz / 1000.0,
             Source: sourceIdentity,
-            SpotterCallsign: sourceIdentity,
+            SpotterCallsign: sourceBaseCall,
             Comment: comment,
             Mode: "CW",
             Color: CwSkimmerSpotColor,
             BackgroundColor: CwSkimmerSpotBackgroundColor,
             LifetimeSeconds: 300);
 
+        var payloadSummary =
+            $"call={radioSpot.Callsign}, freq_mhz={radioSpot.RxFrequencyMHz:F6}, source={radioSpot.Source}, " +
+            $"spotter_callsign={radioSpot.SpotterCallsign}, lifetime_seconds={radioSpot.LifetimeSeconds}";
+
         try
         {
+            AppendSpotPayloadLog($"publish-attempt {payloadSummary}");
             await _connection.PublishSpotAsync(radioSpot);
+            AppendSpotPayloadLog($"publish-success {payloadSummary}");
             UIPost(() => AddSkimmerStatus(
                 $"Spot sent: {spot.Callsign} @ {(spot.FrequencyKhz / 1000.0):F6} MHz"));
         }
         catch (Exception ex)
         {
+            AppendSpotPayloadLog($"publish-failed {payloadSummary}, error={ex.Message}");
             UIPost(() => AddSkimmerStatus($"Spot publish failed: {ex.Message}"));
         }
     }
@@ -626,6 +635,27 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    private static void AppendSpotPayloadLog(string message)
+    {
+        try
+        {
+            var logPath = ResolveSpotPayloadLogPath();
+            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [SPOT] {message}{Environment.NewLine}";
+
+            lock (s_spotPayloadLogSync)
+            {
+                var dir = Path.GetDirectoryName(logPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                    Directory.CreateDirectory(dir);
+                File.AppendAllText(logPath, line);
+            }
+        }
+        catch
+        {
+            // Logging must not impact runtime behavior.
+        }
+    }
+
     private static string ResolveStreamerLogPath()
     {
         var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
@@ -638,6 +668,20 @@ public partial class MainWindowViewModel : ObservableObject
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SDRIQStreamer");
         return Path.Combine(appDataRoot, "artifacts", "logs", "streamer-status.log");
+    }
+
+    private static string ResolveSpotPayloadLogPath()
+    {
+        var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
+            ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+
+        if (repoRoot is not null)
+            return Path.Combine(repoRoot.FullName, "artifacts", "logs", "spot-publish.log");
+
+        var appDataRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SDRIQStreamer");
+        return Path.Combine(appDataRoot, "artifacts", "logs", "spot-publish.log");
     }
 
     private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
@@ -741,9 +785,8 @@ public partial class MainWindowViewModel : ObservableObject
         return ownSlice ?? _connection.Slices.FirstOrDefault();
     }
 
-    private string ResolveSpotSourceIdentity(CwSkimmerSpotInfo spot)
+    private string ResolveSpotSourceIdentity(string baseCall)
     {
-        var baseCall = ResolveSourceBaseCall(spot.Spotter);
         var sliceLetter = GetPreferredSliceForTune()?.Letter?.Trim();
         if (string.IsNullOrWhiteSpace(sliceLetter))
             return baseCall;
