@@ -47,6 +47,11 @@ public interface ICwSkimmerLauncher
     event Action<double>? FrequencyClicked;
 
     /// <summary>
+    /// Fires when CW Skimmer emits a DX spot line.
+    /// </summary>
+    event Action<CwSkimmerSpotInfo>? SpotReceived;
+
+    /// <summary>
     /// Emits key telnet lifecycle/status messages suitable for UI status display.
     /// </summary>
     event Action<string>? TelnetStatusChanged;

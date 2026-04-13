@@ -129,6 +129,14 @@ public sealed class CwSkimmerWorkflowService
         if (trimmed.Length < 3 || trimmed.Length > 16)
             return false;
 
+        // Reject Flex client-handle style placeholders like 0x32F4599F.
+        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
+            trimmed.Length > 2 &&
+            trimmed[2..].All(Uri.IsHexDigit))
+        {
+            return false;
+        }
+
         bool hasLetter = false;
         bool hasDigit = false;
         foreach (var ch in trimmed)

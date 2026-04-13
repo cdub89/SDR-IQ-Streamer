@@ -19,6 +19,11 @@ public interface ICwSkimmerTelnetClient : IAsyncDisposable
     event Action<double>? FrequencyClicked;
 
     /// <summary>
+    /// Fires when CW Skimmer emits a DX spot line on telnet.
+    /// </summary>
+    event Action<CwSkimmerSpotInfo>? SpotReceived;
+
+    /// <summary>
     /// Connect to the CW Skimmer telnet server and log in.
     /// Starts the background receive loop.
     /// </summary>

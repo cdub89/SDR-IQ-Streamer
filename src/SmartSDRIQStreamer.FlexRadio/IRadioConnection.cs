@@ -69,4 +69,10 @@ public interface IRadioConnection
     /// No-op if the slice is not found or the radio is not connected.
     /// </summary>
     Task SetSliceFrequencyAsync(SliceInfo slice, double freqMHz);
+
+    /// <summary>
+    /// Publish a spot to the connected radio.
+    /// No-op when disconnected or when spot payload is invalid.
+    /// </summary>
+    Task PublishSpotAsync(RadioSpotInfo spot);
 }

@@ -224,6 +224,33 @@ public sealed class FlexLibRadioConnection : IRadioConnection
         return Task.CompletedTask;
     }
 
+    public Task PublishSpotAsync(RadioSpotInfo spot)
+    {
+        var radio = _radio;
+        if (radio is null || !radio.Connected)
+            return Task.CompletedTask;
+
+        if (string.IsNullOrWhiteSpace(spot.Callsign) || spot.RxFrequencyMHz <= 0)
+            return Task.CompletedTask;
+
+        var flexSpot = new Spot
+        {
+            Callsign = spot.Callsign.Trim(),
+            RXFrequency = spot.RxFrequencyMHz,
+            Source = NormalizeSource(spot.Source),
+            SpotterCallsign = string.IsNullOrWhiteSpace(spot.SpotterCallsign) ? null : spot.SpotterCallsign.Trim(),
+            Comment = string.IsNullOrWhiteSpace(spot.Comment) ? null : spot.Comment,
+            Mode = spot.Mode,
+            Color = spot.Color,
+            BackgroundColor = spot.BackgroundColor,
+            LifetimeSeconds = spot.LifetimeSeconds,
+            Timestamp = DateTime.UtcNow
+        };
+
+        radio.RequestSpot(flexSpot);
+        return Task.CompletedTask;
+    }
+
     // ── DAX-IQ Streams ───────────────────────────────────────────────────────
 
     private readonly ConcurrentDictionary<int, DaxIQStreamInfo> _daxIQStreams = new();
@@ -393,5 +420,11 @@ public sealed class FlexLibRadioConnection : IRadioConnection
         return string.IsNullOrWhiteSpace(client?.Station)
             ? $"0x{clientHandle:X}"
             : client.Station;
+    }
+
+    private static string NormalizeSource(string? source)
+    {
+        var effective = string.IsNullOrWhiteSpace(source) ? "CWSkimmer" : source.Trim();
+        return effective.Replace(' ', '_');
     }
 }

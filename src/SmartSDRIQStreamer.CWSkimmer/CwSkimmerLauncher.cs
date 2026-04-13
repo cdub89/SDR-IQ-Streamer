@@ -41,6 +41,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
     public event Action<bool>?   RunningStateChanged;
     public event Action<double>? FrequencyClicked;
+    public event Action<CwSkimmerSpotInfo>? SpotReceived;
     public event Action<string>? TelnetStatusChanged;
 
     public string LastDiagnostics { get; private set; } = string.Empty;
@@ -56,6 +57,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         _telnet       = telnet;
 
         _telnet.FrequencyClicked += freq => FrequencyClicked?.Invoke(freq);
+        _telnet.SpotReceived += spot => SpotReceived?.Invoke(spot);
         _telnet.StatusChanged += message => TelnetStatusChanged?.Invoke(message);
     }
 

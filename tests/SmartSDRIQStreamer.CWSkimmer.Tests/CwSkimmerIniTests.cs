@@ -194,6 +194,57 @@ public sealed class CwSkimmerTelnetClientTests
     {
         Assert.Null(CwSkimmerTelnetClient.ParseClickedOn(line));
     }
+
+    [Fact]
+    public void ParseDxSpot_ValidLine_ReturnsStructuredSpot()
+    {
+        const string line = "DX de K1ABC-#: 14015.3 9A3B 19 dB 25 WPM CQ 1534Z";
+        var spot = CwSkimmerTelnetClient.ParseDxSpot(line);
+
+        Assert.NotNull(spot);
+        Assert.Equal(14015.3, spot!.FrequencyKhz, 3);
+        Assert.Equal("9A3B", spot.Callsign);
+        Assert.Equal("K1ABC-#", spot.Spotter);
+        Assert.Equal(19, spot.SignalDb);
+        Assert.Equal(25, spot.SpeedWpm);
+        Assert.Equal("19 dB 25 WPM CQ 1534Z", spot.Comment);
+    }
+
+    [Fact]
+    public void ParseDxSpot_LeadingWhitespace_ReturnsStructuredSpot()
+    {
+        const string line = "   DX de K1ABC-#: 7054.95 W7XYZ 22 dB 31 WPM TEST 0910Z";
+        var spot = CwSkimmerTelnetClient.ParseDxSpot(line);
+
+        Assert.NotNull(spot);
+        Assert.Equal(7054.95, spot!.FrequencyKhz, 3);
+        Assert.Equal("W7XYZ", spot.Callsign);
+        Assert.Equal(22, spot.SignalDb);
+        Assert.Equal(31, spot.SpeedWpm);
+    }
+
+    [Fact]
+    public void ParseDxSpot_TabDelimitedLine_ReturnsStructuredSpot()
+    {
+        const string line = "DX de N0CALL-#:\t14015.3\t9A3B\t19 dB\t25 WPM\tCQ\t1534Z";
+        var spot = CwSkimmerTelnetClient.ParseDxSpot(line);
+
+        Assert.NotNull(spot);
+        Assert.Equal(14015.3, spot!.FrequencyKhz, 3);
+        Assert.Equal("9A3B", spot.Callsign);
+        Assert.Equal("N0CALL-#", spot.Spotter);
+        Assert.Equal(19, spot.SignalDb);
+        Assert.Equal(25, spot.SpeedWpm);
+    }
+
+    [Theory]
+    [InlineData("DX de K1ABC-#: BADFREQ 9A3B 19 dB")]
+    [InlineData("DX de K1ABC-#: 14015.3")]
+    [InlineData("To ALL de SKIMMER 1234 : Clicked on \"W1AW\" at 14012.5")]
+    public void ParseDxSpot_InvalidOrNonSpotLine_ReturnsNull(string line)
+    {
+        Assert.Null(CwSkimmerTelnetClient.ParseDxSpot(line));
+    }
 }
 
 public sealed class CwSkimmerIniModelFactoryTests

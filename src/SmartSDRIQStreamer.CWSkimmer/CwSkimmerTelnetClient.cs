@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
 using System.Linq;
+using System.Globalization;
 
 namespace SDRIQStreamer.CWSkimmer;
 
@@ -47,6 +48,7 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     public event Action<string>? StatusChanged;
     public event Action<double>? FrequencyClicked;
+    public event Action<CwSkimmerSpotInfo>? SpotReceived;
 
     public async Task ConnectAsync(string host, int port, string callsign, string password,
                                    CancellationToken ct = default)
@@ -318,7 +320,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         }
 
         if (line.Contains("Clicked on", StringComparison.OrdinalIgnoreCase) ||
-            line.Contains("SKIMMER/", StringComparison.OrdinalIgnoreCase))
+            line.Contains("SKIMMER/", StringComparison.OrdinalIgnoreCase) ||
+            line.TrimStart().StartsWith("DX de ", StringComparison.OrdinalIgnoreCase))
         {
             LogDiag($"RX {line}");
         }
@@ -326,6 +329,10 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         var freq = ParseClickedOn(line);
         if (freq.HasValue)
             FrequencyClicked?.Invoke(freq.Value);
+
+        var spot = ParseDxSpot(line);
+        if (spot is not null)
+            SpotReceived?.Invoke(spot);
     }
 
     // ── Parsing ───────────────────────────────────────────────────────────────
@@ -349,6 +356,58 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             return freq;
 
         return null;
+    }
+
+    /// <summary>
+    /// Parses CW Skimmer DX spot lines, e.g.
+    /// <c>DX de N0CALL-#:  14015.3  9A3B  19 dB  25 WPM  CQ  1534Z</c>.
+    /// Returns a structured spot, or null if the line is not a DX spot.
+    /// </summary>
+    public static CwSkimmerSpotInfo? ParseDxSpot(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return null;
+        }
+
+        var normalizedLine = line.TrimStart();
+        if (!normalizedLine.StartsWith("DX de ", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var colonIdx = normalizedLine.IndexOf(':');
+        if (colonIdx <= "DX de ".Length)
+            return null;
+
+        var spotter = normalizedLine.Substring("DX de ".Length, colonIdx - "DX de ".Length).Trim();
+        if (string.IsNullOrWhiteSpace(spotter))
+            return null;
+
+        var body = normalizedLine[(colonIdx + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        var tokens = body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2)
+            return null;
+
+        if (!TryParseKhz(tokens[0], out var frequencyKhz) || frequencyKhz <= 0)
+            return null;
+
+        var callsign = tokens[1].Trim();
+        if (string.IsNullOrWhiteSpace(callsign))
+            return null;
+
+        int? signalDb = TryParseMetric(tokens, "dB");
+        int? speedWpm = TryParseMetric(tokens, "WPM");
+        var comment = string.Join(' ', tokens.Skip(2));
+
+        return new CwSkimmerSpotInfo(
+            FrequencyKhz: frequencyKhz,
+            Callsign: callsign,
+            Spotter: spotter,
+            SignalDb: signalDb,
+            SpeedWpm: speedWpm,
+            Comment: comment);
     }
 
     // ── IAC stripping ─────────────────────────────────────────────────────────
@@ -456,6 +515,26 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     private static bool ContainsAny(string text, params string[] markers)
         => markers.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase));
+
+    private static bool TryParseKhz(string token, out double khz)
+    {
+        var normalized = token.Trim().Replace(',', '.');
+        return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out khz);
+    }
+
+    private static int? TryParseMetric(string[] tokens, string metricToken)
+    {
+        for (var i = 1; i < tokens.Length; i++)
+        {
+            if (!tokens[i].Equals(metricToken, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (int.TryParse(tokens[i - 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+                return value;
+        }
+
+        return null;
+    }
 
     private static bool LooksLikeSessionReady(string text)
         => ContainsAny(text,

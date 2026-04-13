@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,7 @@ namespace SDRIQStreamer.App;
 
 public partial class MainWindowViewModel : ObservableObject
 {
+    private static readonly object s_streamerLogSync = new();
     private readonly IRadioDiscovery   _discovery;
     private readonly IRadioConnection  _connection;
     private readonly ICwSkimmerLauncher _launcher;
@@ -95,6 +97,8 @@ public partial class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan EchoSuppressWindow = TimeSpan.FromMilliseconds(700);
     private const double DuplicateClickToleranceMHz = 0.000005; // 5 Hz
     private static readonly TimeSpan DuplicateClickWindow = TimeSpan.FromMilliseconds(250);
+    private const string CwSkimmerSpotColor = "#FF00FFFF";
+    private const string CwSkimmerSpotBackgroundColor = "#66000000";
 
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
@@ -168,6 +172,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         _launcher.TelnetStatusChanged += message =>
             UIPost(() => AddTelnetStatus(message));
+        _launcher.SpotReceived += spot => _ = PublishSkimmerSpotAsync(spot);
 
         // Load persisted settings
         CwSkimmerExePath = _settings.CwSkimmerExePath;
@@ -529,6 +534,45 @@ public partial class MainWindowViewModel : ObservableObject
     private bool CanStopCwSkimmerForChannel(DaxIQStreamInfo? stream) =>
         _cwSkimmerWorkflow.CanStop(stream);
 
+    private async Task PublishSkimmerSpotAsync(CwSkimmerSpotInfo spot)
+    {
+        if (!IsConnected || spot.FrequencyKhz <= 0 || string.IsNullOrWhiteSpace(spot.Callsign))
+            return;
+
+        var commentParts = new List<string>();
+        if (spot.SignalDb.HasValue)
+            commentParts.Add($"{spot.SignalDb.Value} dB");
+        if (spot.SpeedWpm.HasValue)
+            commentParts.Add($"{spot.SpeedWpm.Value} WPM");
+        if (!string.IsNullOrWhiteSpace(spot.Comment))
+            commentParts.Add(spot.Comment);
+
+        var comment = commentParts.Count == 0 ? null : string.Join(" | ", commentParts);
+        var sourceIdentity = ResolveSpotSourceIdentity(spot);
+
+        var radioSpot = new RadioSpotInfo(
+            Callsign: spot.Callsign,
+            RxFrequencyMHz: spot.FrequencyKhz / 1000.0,
+            Source: sourceIdentity,
+            SpotterCallsign: sourceIdentity,
+            Comment: comment,
+            Mode: "CW",
+            Color: CwSkimmerSpotColor,
+            BackgroundColor: CwSkimmerSpotBackgroundColor,
+            LifetimeSeconds: 300);
+
+        try
+        {
+            await _connection.PublishSpotAsync(radioSpot);
+            UIPost(() => AddSkimmerStatus(
+                $"Spot sent: {spot.Callsign} @ {(spot.FrequencyKhz / 1000.0):F6} MHz"));
+        }
+        catch (Exception ex)
+        {
+            UIPost(() => AddSkimmerStatus($"Spot publish failed: {ex.Message}"));
+        }
+    }
+
     // ── Shutdown ──────────────────────────────────────────────────────────────
 
     public void Shutdown()
@@ -553,9 +597,65 @@ public partial class MainWindowViewModel : ObservableObject
         FooterStatusText = _footerStatusBuffer.Add(message);
     }
 
-    private void AddStreamerStatus(string message) => AddFooterStatus($"[STREAMER] {message}");
+    private void AddStreamerStatus(string message)
+    {
+        AddFooterStatus($"[STREAMER] {message}");
+        AppendStreamerLog(message);
+    }
     private void AddSkimmerStatus(string message) => AddFooterStatus($"[SKIMMER] {message}");
     private void AddTelnetStatus(string message) => AddFooterStatus($"[TELNET] {message}");
+
+    private static void AppendStreamerLog(string message)
+    {
+        try
+        {
+            var logPath = ResolveStreamerLogPath();
+            var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [STREAMER] {message}{Environment.NewLine}";
+
+            lock (s_streamerLogSync)
+            {
+                var dir = Path.GetDirectoryName(logPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                    Directory.CreateDirectory(dir);
+                File.AppendAllText(logPath, line);
+            }
+        }
+        catch
+        {
+            // Logging must not impact runtime behavior.
+        }
+    }
+
+    private static string ResolveStreamerLogPath()
+    {
+        var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
+            ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+
+        if (repoRoot is not null)
+            return Path.Combine(repoRoot.FullName, "artifacts", "logs", "streamer-status.log");
+
+        var appDataRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SDRIQStreamer");
+        return Path.Combine(appDataRoot, "artifacts", "logs", "streamer-status.log");
+    }
+
+    private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
+    {
+        var current = start;
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.csproj")) ||
+                File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.slnx")))
+            {
+                return current;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
 
     private void QueueLoSync(long freqHz)
     {
@@ -639,6 +739,67 @@ public partial class MainWindowViewModel : ObservableObject
     {
         var ownSlice = _connection.Slices.FirstOrDefault(IsOwnStationSlice);
         return ownSlice ?? _connection.Slices.FirstOrDefault();
+    }
+
+    private string ResolveSpotSourceIdentity(CwSkimmerSpotInfo spot)
+    {
+        var baseCall = ResolveSourceBaseCall(spot.Spotter);
+        var sliceLetter = GetPreferredSliceForTune()?.Letter?.Trim();
+        if (string.IsNullOrWhiteSpace(sliceLetter))
+            return baseCall;
+
+        return $"{baseCall}/{sliceLetter.ToUpperInvariant()}";
+    }
+
+    private string ResolveSourceBaseCall(string? spotterFromTelnet)
+    {
+        if (IsLikelySourceCallsign(_settings.Callsign))
+            return _settings.Callsign.Trim().ToUpperInvariant();
+
+        var normalizedSpotter = NormalizeTelnetSpotterCallsign(spotterFromTelnet);
+        if (IsLikelySourceCallsign(normalizedSpotter))
+            return normalizedSpotter;
+
+        return "CWSKIMMER";
+    }
+
+    private static string NormalizeTelnetSpotterCallsign(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var trimmed = value.Trim().ToUpperInvariant();
+        var hyphenIdx = trimmed.LastIndexOf('-');
+        if (hyphenIdx <= 0 || hyphenIdx >= trimmed.Length - 1)
+            return trimmed;
+
+        var suffix = trimmed[(hyphenIdx + 1)..];
+        if (suffix.All(ch => ch == '#' || char.IsDigit(ch)))
+            return trimmed[..hyphenIdx];
+
+        return trimmed;
+    }
+
+    private static bool IsLikelySourceCallsign(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length < 3 || trimmed.Length > 16)
+            return false;
+
+        bool hasLetter = false;
+        bool hasDigit = false;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsLetter(ch)) hasLetter = true;
+            else if (char.IsDigit(ch)) hasDigit = true;
+            else if (ch != '-' && ch != '/')
+                return false;
+        }
+
+        return hasLetter && hasDigit;
     }
 
     private bool IsOwnStationSlice(SliceInfo slice)
