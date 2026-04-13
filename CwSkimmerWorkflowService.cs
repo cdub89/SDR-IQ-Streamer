@@ -48,22 +48,19 @@ public sealed class CwSkimmerWorkflowService
             ? _connection.Slices.FirstOrDefault(s => s.PanadapterStreamId == pan.StreamId)
             : _connection.Slices.FirstOrDefault();
 
+        var centerFreqHz = (long)(stream.CenterFreqMHz * 1_000_000);
+
         var config = new CwSkimmerConfig
         {
             ExePath = exePath,
+            SkimmerIniPath = _settings.CwSkimmerIniPath,
             ConnectDelaySeconds = _settings.ConnectDelaySeconds,
             LaunchDelaySeconds = _settings.LaunchDelaySeconds,
             Callsign = ResolveTelnetCallsign(),
-            Operator = _settings.Operator,
-            Location = _settings.Location,
-            GridSquare = _settings.GridSquare,
-            IqWavDir = _settings.IqWavDir,
-            CwPitch = _settings.CwPitch,
             TelnetPort = 7300 + (stream.DAXIQChannel * 10),
             InitialSliceFreqMHz = slice?.FreqMHz ?? 0,
+            InitialLoFreqHz = centerFreqHz,
         };
-
-        var centerFreqHz = (long)(stream.CenterFreqMHz * 1_000_000);
         addStatus($"Launching CW Skimmer on ch {stream.DAXIQChannel} ({stream.SampleRate / 1000} kHz).");
 
         var result = await _launcher.LaunchAsync(
@@ -74,6 +71,7 @@ public sealed class CwSkimmerWorkflowService
             LaunchResult.Success => FormatLaunchSuccess(),
             LaunchResult.AlreadyRunning => "Already running.",
             LaunchResult.ExeNotFound => "CW Skimmer exe not found — check the path.",
+            LaunchResult.TemplateIniNotFound => "CW Skimmer INI template not found — set a valid cwskimmer.ini path.",
             LaunchResult.DeviceNotFound => FormatDeviceNotFound(stream.DAXIQChannel),
             LaunchResult.ProcessStartFailed => "Failed to start CW Skimmer process.",
             _ => "Launch failed."

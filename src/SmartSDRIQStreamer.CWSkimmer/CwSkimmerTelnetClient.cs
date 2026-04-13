@@ -41,6 +41,7 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
     private DateTime                _lastLoSyncStatusUtc;
     private DateTime                _lastQsySyncStatusUtc;
     private volatile bool           _isSessionReady;
+    private int                     _disconnectInProgress;
 
     public bool IsConnected => _tcp is not null && _stream is not null && _writer is not null && _isSessionReady;
 
@@ -153,26 +154,51 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     public async Task DisconnectAsync()
     {
-        LogDiag("DISCONNECT start");
-        EmitStatus("Telnet disconnecting...");
-        _readCts?.Cancel();
-        if (_readTask is not null)
+        if (Interlocked.CompareExchange(ref _disconnectInProgress, 1, 0) != 0)
+            return;
+
+        var hadConnection =
+            _tcp is not null ||
+            _stream is not null ||
+            _writer is not null ||
+            _readTask is not null ||
+            _readCts is not null ||
+            _isSessionReady;
+
+        if (!hadConnection)
         {
-            try { await _readTask.WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
+            _isSessionReady = false;
+            Interlocked.Exchange(ref _disconnectInProgress, 0);
+            return;
         }
 
-        _writer?.Dispose();
-        _stream?.Dispose();
-        _tcp?.Dispose();
+        LogDiag("DISCONNECT start");
+        EmitStatus("Telnet disconnecting...");
+        try
+        {
+            _readCts?.Cancel();
+            if (_readTask is not null)
+            {
+                try { await _readTask.WaitAsync(TimeSpan.FromSeconds(3)); } catch { }
+            }
 
-        _isSessionReady = false;
-        _writer   = null;
-        _stream   = null;
-        _tcp      = null;
-        _readCts  = null;
-        _readTask = null;
-        LogDiag("DISCONNECT complete");
-        EmitStatus("Telnet disconnected.");
+            _writer?.Dispose();
+            _stream?.Dispose();
+            _tcp?.Dispose();
+
+            _isSessionReady = false;
+            _writer   = null;
+            _stream   = null;
+            _tcp      = null;
+            _readCts  = null;
+            _readTask = null;
+            LogDiag("DISCONNECT complete");
+            EmitStatus("Telnet disconnected.");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _disconnectInProgress, 0);
+        }
     }
 
     public async ValueTask DisposeAsync() => await DisconnectAsync();
@@ -391,39 +417,7 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     private static string ResolveDiagPath()
     {
-        try
-        {
-            var fromBaseDir = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory));
-            if (fromBaseDir is not null)
-                return Path.Combine(fromBaseDir.FullName, "artifacts", "logs", "cwskimmer-telnet-client.log");
-
-            var fromCurrentDir = TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
-            if (fromCurrentDir is not null)
-                return Path.Combine(fromCurrentDir.FullName, "artifacts", "logs", "cwskimmer-telnet-client.log");
-        }
-        catch
-        {
-            // Fall back to temp path below.
-        }
-
-        return Path.Combine(Path.GetTempPath(), "SDRIQStreamer", "cwskimmer-telnet-client.log");
-    }
-
-    private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
-    {
-        var current = start;
-        while (current is not null)
-        {
-            if (File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.csproj")) ||
-                File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.slnx")))
-            {
-                return current;
-            }
-
-            current = current.Parent;
-        }
-
-        return null;
+        return Path.Combine(RuntimePathResolver.ResolveLogsDir(), "cwskimmer-telnet-client.log");
     }
 
     private void EmitStatus(string message)

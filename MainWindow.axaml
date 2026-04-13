@@ -149,6 +149,22 @@
                     Click="OnBrowseCwSkimmer"/>
         </Grid>
 
+        <!-- CW Skimmer INI template path row -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,2,0,0">
+            <TextBox Grid.Column="0"
+                     Text="{Binding CwSkimmerIniPath}"
+                     Watermark="Path to cwskimmer.ini"
+                     FontSize="11"
+                     Height="20"/>
+            <Button Grid.Column="1"
+                    Content="Browse…"
+                    MinWidth="52"
+                    Height="16"
+                    FontSize="9"
+                    Padding="4,0"
+                    Click="OnBrowseCwSkimmerIni"/>
+        </Grid>
+
         <!-- Per-channel launch rows -->
         <ItemsControl ItemsSource="{Binding DaxIQStreams}" Margin="0,4,0,0">
             <ItemsControl.ItemTemplate>

@@ -12,6 +12,7 @@ namespace SDRIQStreamer.FlexRadio;
 /// </summary>
 public sealed class FlexLibRadioConnection : IRadioConnection
 {
+    private const double SliceNoOpToleranceMHz = 0.000001; // 1 Hz
     private Radio? _radio;
 
     // ── Connection ───────────────────────────────────────────────────────────
@@ -215,7 +216,11 @@ public sealed class FlexLibRadioConnection : IRadioConnection
             string.Equals(ResolveStation(s.ClientHandle), slice.ClientStation, StringComparison.OrdinalIgnoreCase));
 
         if (target is not null)
-            target.Freq = freqMHz;
+        {
+            // Avoid unnecessary radio writes when frequency is unchanged (or within jitter tolerance).
+            if (Math.Abs(target.Freq - freqMHz) > SliceNoOpToleranceMHz)
+                target.Freq = freqMHz;
+        }
         return Task.CompletedTask;
     }
 

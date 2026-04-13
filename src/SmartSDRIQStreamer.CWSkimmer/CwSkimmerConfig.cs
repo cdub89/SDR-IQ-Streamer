@@ -7,6 +7,11 @@ public sealed record CwSkimmerConfig
 {
     /// <summary>Full path to CwSkimmer.exe.</summary>
     public string ExePath   { get; init; } = @"C:\Program Files (x86)\Afreet\CwSkimmer\CwSkimmer.exe";
+    /// <summary>
+    /// Path to the user-maintained CW Skimmer INI file (typically from a manual CW Skimmer run).
+    /// Used as the source template when rebuilding streamer-managed INI files.
+    /// </summary>
+    public string SkimmerIniPath { get; init; } = string.Empty;
 
     /// <summary>Seconds to wait after process start before connecting the telnet client.</summary>
     public int ConnectDelaySeconds { get; init; } = 5;
@@ -14,20 +19,9 @@ public sealed record CwSkimmerConfig
     /// <summary>Seconds to wait before launching the process.</summary>
     public int LaunchDelaySeconds  { get; init; } = 3;
 
-    // ── Station info (written into [Recorder]) ────────────────────────────────
+    // ── Session identity ──────────────────────────────────────────────────────
 
     public string Callsign  { get; init; } = string.Empty;
-    public string Operator  { get; init; } = string.Empty;
-    public string Location  { get; init; } = string.Empty;
-    public string GridSquare { get; init; } = string.Empty;
-
-    /// <summary>Directory for IQ .wav recordings ([Recorder] WavDir).</summary>
-    public string IqWavDir  { get; init; } = string.Empty;
-
-    // ── CW settings ───────────────────────────────────────────────────────────
-
-    /// <summary>CW pitch in Hz written to [Radio] Pitch.</summary>
-    public int CwPitch { get; init; } = 600;
 
     // ── Telnet server settings (used by Phase 3 client) ───────────────────────
 
@@ -45,4 +39,11 @@ public sealed record CwSkimmerConfig
     /// shows the correct operating frequency immediately.
     /// </summary>
     public double InitialSliceFreqMHz { get; init; } = 0;
+
+    /// <summary>
+    /// Panadapter centre frequency in Hz at launch time.
+    /// Sent as SKIMMER/LO_FREQ after telnet connects so CW Skimmer starts on the
+    /// correct band/LO context immediately.
+    /// </summary>
+    public long InitialLoFreqHz { get; init; } = 0;
 }

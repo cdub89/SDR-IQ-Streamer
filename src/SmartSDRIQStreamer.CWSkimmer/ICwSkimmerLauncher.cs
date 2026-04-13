@@ -5,6 +5,7 @@ public enum LaunchResult
     Success,
     AlreadyRunning,
     ExeNotFound,
+    TemplateIniNotFound,
     DeviceNotFound,
     ProcessStartFailed
 }
@@ -79,4 +80,5 @@ public interface ICwSkimmerLauncher
 
     /// <summary>Kills a single CW Skimmer process for a DAX-IQ channel if running.</summary>
     void Stop(int daxIqChannel);
+
 }

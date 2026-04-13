@@ -10,7 +10,7 @@ namespace SDRIQStreamer.CWSkimmer;
 public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 {
     private static readonly string IniDir =
-        ResolveIniDir();
+        RuntimePathResolver.ResolveCwSkimmerIniDir();
 
     private readonly CwSkimmerIniModelFactory _modelFactory;
     private readonly CwSkimmerIniWriter       _iniWriter;
@@ -21,6 +21,8 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     private readonly List<Task> _backgroundTasks = new();
     private readonly object _sync = new();
     private CancellationTokenSource _telnetLifecycleCts = new();
+    private int _telnetDisconnectInFlight;
+    private bool? _lastEmittedRunningState;
 
     public bool IsRunning
     {
@@ -97,6 +99,9 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         if (model.WdmSignalDevIndex < 0) return LaunchResult.DeviceNotFound;
 
         var iniPath = Path.Combine(IniDir, $"CwSkimmer-ch{daxIqChannel}.ini");
+        if (!PrepareManagedIniFromTemplate(iniPath, config, out _))
+            return LaunchResult.TemplateIniNotFound;
+
         _iniWriter.Write(model, iniPath);
 
         if (config.LaunchDelaySeconds > 0)
@@ -122,13 +127,14 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         process.Exited += (_, _) => OnProcessExited(daxIqChannel);
         lock (_sync)
             _processesByChannel[daxIqChannel] = process;
-        RunningStateChanged?.Invoke(true);
+        EmitRunningStateChangedIfNeeded(true);
 
         // Connect telnet in the background after CW Skimmer has started up,
         // then immediately sync the VFO frequency.
         var sliceFreqMHz = config.InitialSliceFreqMHz;
+        var loFreqHz = config.InitialLoFreqHz;
         if (!_telnet.IsConnected)
-            RunBackgroundTask(ConnectTelnetAsync(config, sliceFreqMHz, _telnetLifecycleCts.Token), "telnet connect");
+            RunBackgroundTask(ConnectTelnetAsync(config, sliceFreqMHz, loFreqHz, _telnetLifecycleCts.Token), "telnet connect");
 
         return LaunchResult.Success;
     }
@@ -136,6 +142,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     private async Task ConnectTelnetAsync(
         CwSkimmerConfig config,
         double initialSliceFreqMHz,
+        long initialLoFreqHz,
         CancellationToken ct)
     {
         if (config.ConnectDelaySeconds > 0)
@@ -152,8 +159,11 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                 config.TelnetPassword,
                 ct);
 
-            // Sync initial VFO frequency so the main CW Skimmer window
-            // shows the slice frequency immediately after connect.
+            // Sync initial LO and VFO immediately after connect so CW Skimmer
+            // starts on the correct band/frequency context.
+            if (initialLoFreqHz > 0)
+                await _telnet.SendLoFreqAsync(initialLoFreqHz, ct);
+
             if (initialSliceFreqMHz > 0)
                 await _telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
         }
@@ -197,7 +207,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
         CancelPendingTelnetWork();
         BeginTelnetDisconnect();
-        RunningStateChanged?.Invoke(IsRunning);
+        EmitRunningStateChangedIfNeeded(IsRunning);
     }
 
     public void Stop(int daxIqChannel)
@@ -224,7 +234,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             BeginTelnetDisconnect();
         }
 
-        RunningStateChanged?.Invoke(IsRunning);
+        EmitRunningStateChangedIfNeeded(IsRunning);
     }
 
     private void OnProcessExited(int daxIqChannel)
@@ -237,7 +247,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             CancelPendingTelnetWork();
             BeginTelnetDisconnect();
         }
-        RunningStateChanged?.Invoke(IsRunning);
+        EmitRunningStateChangedIfNeeded(IsRunning);
     }
 
     private static string BuildDiagnostics(
@@ -276,45 +286,43 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         catch (Exception ex) { LogNonFatal("Failed to write diagnostic log.", ex); }
     }
 
-    private static string ResolveIniDir()
+    private bool PrepareManagedIniFromTemplate(string targetIniPath, CwSkimmerConfig config, out string templateIniPath)
     {
+        templateIniPath = ResolveTemplateIniPath(config);
+        if (string.IsNullOrWhiteSpace(templateIniPath))
+            return false;
+
         try
         {
-            var fromBaseDir = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory));
-            if (fromBaseDir is not null)
-                return Path.Combine(fromBaseDir.FullName, "artifacts", "cwskimmer", "ini");
+            var dir = Path.GetDirectoryName(targetIniPath);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
 
-            var fromCurrentDir = TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
-            if (fromCurrentDir is not null)
-                return Path.Combine(fromCurrentDir.FullName, "artifacts", "cwskimmer", "ini");
+            File.Copy(templateIniPath, targetIniPath, overwrite: true);
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
-            // Fall back to temp path below.
+            LogNonFatal("Failed to seed managed INI from template.", ex);
+            return false;
         }
-
-        return Path.Combine(Path.GetTempPath(), "SDRIQStreamer");
     }
 
-    private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
+    private string ResolveTemplateIniPath(CwSkimmerConfig config)
     {
-        var current = start;
-        while (current is not null)
-        {
-            if (File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.csproj")) ||
-                File.Exists(Path.Combine(current.FullName, "SmartSDRIQStreamer.slnx")))
-            {
-                return current;
-            }
+        if (!string.IsNullOrWhiteSpace(config.SkimmerIniPath) && File.Exists(config.SkimmerIniPath))
+            return config.SkimmerIniPath;
 
-            current = current.Parent;
-        }
-
-        return null;
+        return string.Empty;
     }
 
     private void BeginTelnetDisconnect()
-        => RunBackgroundTask(DisconnectTelnetAsync(), "telnet disconnect");
+    {
+        if (Interlocked.CompareExchange(ref _telnetDisconnectInFlight, 1, 0) != 0)
+            return;
+
+        RunBackgroundTask(DisconnectTelnetAsync(), "telnet disconnect");
+    }
 
     private void CancelPendingTelnetWork()
     {
@@ -334,6 +342,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     {
         try { await _telnet.DisconnectAsync(); }
         catch (Exception ex) { LogNonFatal("Background telnet disconnect failed.", ex); }
+        finally { Interlocked.Exchange(ref _telnetDisconnectInFlight, 0); }
     }
 
     private void RunBackgroundTask(Task task, string operation)
@@ -357,6 +366,19 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             Debug.WriteLine($"[CwSkimmerLauncher] {message}");
         else
             Debug.WriteLine($"[CwSkimmerLauncher] {message} {ex.Message}");
+    }
+
+    private void EmitRunningStateChangedIfNeeded(bool running)
+    {
+        lock (_sync)
+        {
+            if (_lastEmittedRunningState.HasValue && _lastEmittedRunningState.Value == running)
+                return;
+
+            _lastEmittedRunningState = running;
+        }
+
+        RunningStateChanged?.Invoke(running);
     }
 
     public void Dispose()

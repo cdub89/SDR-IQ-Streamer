@@ -76,12 +76,25 @@ public partial class MainWindowViewModel : ObservableObject
     private string _cwSkimmerExePath = string.Empty;
 
     [ObservableProperty]
+    private string _cwSkimmerIniPath = string.Empty;
+
+    [ObservableProperty]
     private bool _isCwSkimmerRunning;
 
     public ObservableCollection<string> FooterStatusLines { get; } = new();
     private readonly Dictionary<int, string> _lastCwDevicePreviewByChannel = new();
     private CancellationTokenSource? _sliceSyncCts;
     private CancellationTokenSource? _loSyncCts;
+    private readonly object _syncDampenGate = new();
+    private double _lastOutboundQsyMHz;
+    private DateTime _lastOutboundQsyUtc;
+    private double _lastInboundClickMHz;
+    private DateTime _lastInboundClickUtc;
+
+    private const double EchoSuppressToleranceMHz = 0.000010; // 10 Hz
+    private static readonly TimeSpan EchoSuppressWindow = TimeSpan.FromMilliseconds(700);
+    private const double DuplicateClickToleranceMHz = 0.000005; // 5 Hz
+    private static readonly TimeSpan DuplicateClickWindow = TimeSpan.FromMilliseconds(250);
 
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
@@ -145,6 +158,9 @@ public partial class MainWindowViewModel : ObservableObject
             var slice = GetPreferredSliceForTune();
             if (slice is null) return;
             double freqMHz = freqKhz / 1000.0;
+            if (ShouldSuppressInboundClick(freqMHz))
+                return;
+
             _ = _connection.SetSliceFrequencyAsync(slice, freqMHz);
             UIPost(() => AddTelnetStatus(
                 $"Click tune (Skimmer): {freqMHz:F6} MHz -> Slice {slice.Letter} ({slice.ClientStation})"));
@@ -155,6 +171,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         // Load persisted settings
         CwSkimmerExePath = _settings.CwSkimmerExePath;
+        CwSkimmerIniPath = _settings.CwSkimmerIniPath;
 
         _discovery.Start();
     }
@@ -526,6 +543,11 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.CwSkimmerExePath = value;
     }
 
+    partial void OnCwSkimmerIniPathChanged(string value)
+    {
+        _settings.CwSkimmerIniPath = value;
+    }
+
     private void AddFooterStatus(string message)
     {
         FooterStatusText = _footerStatusBuffer.Add(message);
@@ -557,6 +579,7 @@ public partial class MainWindowViewModel : ObservableObject
             try
             {
                 await Task.Delay(120, cts.Token);
+                RecordOutboundQsy(freqMHz);
                 await _launcher.UpdateSliceFreqAsync(freqMHz);
             }
             catch (OperationCanceledException) { }
@@ -576,6 +599,40 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         return next;
+    }
+
+    private void RecordOutboundQsy(double freqMHz)
+    {
+        lock (_syncDampenGate)
+        {
+            _lastOutboundQsyMHz = freqMHz;
+            _lastOutboundQsyUtc = DateTime.UtcNow;
+        }
+    }
+
+    private bool ShouldSuppressInboundClick(double freqMHz)
+    {
+        var now = DateTime.UtcNow;
+        lock (_syncDampenGate)
+        {
+            // Suppress immediate echo-back from our own outbound QSY commands.
+            if ((now - _lastOutboundQsyUtc) <= EchoSuppressWindow &&
+                Math.Abs(freqMHz - _lastOutboundQsyMHz) <= EchoSuppressToleranceMHz)
+            {
+                return true;
+            }
+
+            // Suppress fast duplicate click notifications at effectively same frequency.
+            if ((now - _lastInboundClickUtc) <= DuplicateClickWindow &&
+                Math.Abs(freqMHz - _lastInboundClickMHz) <= DuplicateClickToleranceMHz)
+            {
+                return true;
+            }
+
+            _lastInboundClickMHz = freqMHz;
+            _lastInboundClickUtc = now;
+            return false;
+        }
     }
 
     private SliceInfo? GetPreferredSliceForTune()

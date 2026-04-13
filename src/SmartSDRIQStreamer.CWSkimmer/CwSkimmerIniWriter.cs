@@ -12,7 +12,6 @@ public sealed class CwSkimmerIniWriter
     private static readonly string[] s_ownedSectionOrder =
     [
         "Audio",
-        "Radio",
         "Telnet",
     ];
 
@@ -81,13 +80,6 @@ public sealed class CwSkimmerIniWriter
                 "UseWdm=1",
                 "ShiftQ=0",
                 "SwapIQ=0",
-            ],
-            ["Radio"] =
-            [
-                "SdrType=2",
-                $"Pitch={cfg.CwPitch}",
-                "EstimateIQBalance=1",
-                "CorrectIQBalance=1",
             ],
             ["Telnet"] =
             [

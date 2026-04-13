@@ -8,23 +8,16 @@ public sealed class AppSettings
     // ── CW Skimmer paths ──────────────────────────────────────────────────────
 
     public string CwSkimmerExePath   { get; set; } = string.Empty;
+    public string CwSkimmerIniPath   { get; set; } = string.Empty;
 
     // ── Timing ────────────────────────────────────────────────────────────────
 
     public int ConnectDelaySeconds { get; set; } = 5;
     public int LaunchDelaySeconds  { get; set; } = 3;
 
-    // ── Station info (written to [Recorder]) ──────────────────────────────────
+    // ── Session identity ──────────────────────────────────────────────────────
 
-    public string Callsign   { get; set; } = string.Empty;
-    public string Operator   { get; set; } = string.Empty;
-    public string Location   { get; set; } = string.Empty;
-    public string GridSquare { get; set; } = string.Empty;
-    public string IqWavDir   { get; set; } = string.Empty;
-
-    // ── CW ────────────────────────────────────────────────────────────────────
-
-    public int CwPitch { get; set; } = 600;
+    public string Callsign { get; set; } = string.Empty;
 
     // ── Main window placement ─────────────────────────────────────────────────
 

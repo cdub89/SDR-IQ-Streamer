@@ -20,10 +20,11 @@ This project is a work in progress. Development status is tracked in the roadmap
 
 1. Launch `SDRIQStreamer.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
 2. In the app's CW Skimmer section, use **Browse...** to set the local path to `CwSkimmer.exe` (typically `C:\Program Files (x86)\Afreet\CwSkimmer\`).
-3. In **Available Radio / Station Targets**, select the radio+station row you want to control and click **Connect**.
-4. Click **Launch** to start CW Skimmer. In CW Skimmer, open **View > Settings** and verify the **Radio**, **Audio**, and **Operator** tabs for your station.
-5. In the CW Skimmer toolbar, click **Start Radio** to begin decoding.
-6. Use the footer status tags (`[STREAMER]`, `[SKIMMER]`, `[TELNET]`) to verify connect, launch, and sync direction (VFO vs Skimmer click-tune).
+3. Set the `cwskimmer.ini` path to the INI created by running CW Skimmer manually at least once.
+4. In **Available Radio / Station Targets**, select the radio+station row you want to control and click **Connect**.
+5. Click **Launch** to start CW Skimmer. In CW Skimmer, open **View > Settings** and verify the **Radio**, **Audio**, and **Operator** tabs for your station.
+6. In the CW Skimmer toolbar, click **Start Radio** to begin decoding.
+7. Use the footer status tags (`[STREAMER]`, `[SKIMMER]`, `[TELNET]`) to verify connect, launch, and sync direction (VFO vs Skimmer click-tune).
 
 ### Development Prerequisites
 
@@ -75,6 +76,11 @@ dotnet test tests
 - **Phase 2.2 (CW launch)**: COMPLETE — launch path and validated DAX device mappings are in place.
 - **Phase 2.3 (Runtime sync)**: COMPLETE for alpha-2 baseline — bidirectional QSY and runtime LO/QSY sync are functioning, including multi-station control gating.
 - **Phase 3 (Polish / hardening)**: IN PROGRESS — long-run stability, persistence edge cases, and UX/error refinement.
+- **Phase 3.1 (Bridge spots)**: UPCOMING — add spot forwarding from the Streamer/CW Skimmer bridge into the radio spot workflow.
+- **Phase 3.2 (RIT fine tuning sync)**: UPCOMING — propagate radio RIT fine-tuning offsets to CW Skimmer so receive tuning can move by small Hz offsets without changing transmit slice frequency.
+- **Phase 3.3 (Network quality monitor)**: UPCOMING — display radio-reported `current RTT` (real-time round-trip latency between station and radio) and `max RTT` (highest RTT value since reset).
+- **Phase 3.4 (Configuration pages)**: UPCOMING — add settings pages for CW Skimmer path and CW Skimmer Radio/Audio/Network tab parameters managed by the app.
+- **Phase 3.5 (Operating page simplification)**: ITERATIVE ACROSS PHASE 3 — continuously polish the main operating page so it shows only essential operator information while 3.1-3.4 are delivered.
 
 ## Notes
 
@@ -82,4 +88,5 @@ dotnet test tests
 - Download FlexLib API (SmartSDR v4): [https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/](https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/)
 - Build currently emits legacy FlexLib warnings on `net8.0-windows`; this is tracked separately.
 - CW Skimmer per-channel INI and diagnostic files are written under `artifacts/cwskimmer/ini`.
-- The app updates only `[Audio]`, `[Radio]`, and `[Telnet]` sections in the CW Skimmer INI and preserves CW Skimmer-managed sections (for example `[Windows]`).
+- On each launch, the app starts from the selected `cwskimmer.ini` template and writes channel-specific runtime settings.
+- The app updates only `[Audio]` and `[Telnet]` sections in the CW Skimmer INI and preserves CW Skimmer-managed sections (for example `[Windows]` and `[Radio]`).

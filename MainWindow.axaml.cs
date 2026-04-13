@@ -50,6 +50,27 @@ public partial class MainWindow : Window
             vm.CwSkimmerExePath = files[0].Path.LocalPath;
     }
 
+    private async void OnBrowseCwSkimmerIni(object? sender, RoutedEventArgs e)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null) return;
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select cwskimmer.ini",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("INI file") { Patterns = ["*.ini"] },
+                new FilePickerFileType("All files") { Patterns = ["*"] }
+            ]
+        });
+
+        if (files.Count > 0 && DataContext is MainWindowViewModel vm)
+            vm.CwSkimmerIniPath = files[0].Path.LocalPath;
+    }
+
+
     private void RestoreWindowPlacement()
     {
         var settings = _settingsSession.Settings;

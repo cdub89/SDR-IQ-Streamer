@@ -28,11 +28,6 @@ public sealed class CwSkimmerIniWriterTests
     private static CwSkimmerConfig DefaultConfig() => new()
     {
         Callsign   = "WX7V",
-        Operator   = "Chris",
-        Location   = "Dallas",
-        GridSquare = "EM12OU",
-        IqWavDir   = @"C:\IQ-Wav",
-        CwPitch    = 600,
         TelnetPort = 7310,
     };
 
@@ -68,19 +63,7 @@ public sealed class CwSkimmerIniWriterTests
         Assert.Contains("UseWdm=1",         text);
     }
 
-    // ── [Radio] section ───────────────────────────────────────────────────────
-
-    [Fact]
-    public void Write_RadioSection_SdrType2AndPitch()
-    {
-        var text = WriteToString(MakeModel());
-
-        Assert.Contains("[Radio]",    text);
-        Assert.Contains("SdrType=2",  text);
-        Assert.Contains("Pitch=600",  text);
-    }
-
-    // [sdrSR] and [Recorder] are CW Skimmer-owned and intentionally preserved.
+    // [Radio], [sdrSR], and [Recorder] are CW Skimmer-owned and intentionally preserved.
 
     // ── [Telnet] section ──────────────────────────────────────────────────────
 
@@ -112,15 +95,13 @@ public sealed class CwSkimmerIniWriterTests
     // ── Section ordering ──────────────────────────────────────────────────────
 
     [Fact]
-    public void Write_SectionOrder_AudioBeforeRadioBeforeTelnet()
+    public void Write_SectionOrder_AudioBeforeTelnet()
     {
         var text  = WriteToString(MakeModel());
         int audio = text.IndexOf("[Audio]", StringComparison.Ordinal);
-        int radio = text.IndexOf("[Radio]", StringComparison.Ordinal);
         int telnet = text.IndexOf("[Telnet]", StringComparison.Ordinal);
 
-        Assert.True(audio < radio, "[Audio] should precede [Radio]");
-        Assert.True(radio < telnet,   "[Radio] should precede [Telnet]");
+        Assert.True(audio < telnet, "[Audio] should precede [Telnet]");
     }
 
     [Fact]
