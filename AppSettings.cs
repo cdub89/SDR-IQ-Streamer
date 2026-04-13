@@ -18,6 +18,15 @@ public sealed class AppSettings
     // ── Session identity ──────────────────────────────────────────────────────
 
     public string Callsign { get; set; } = string.Empty;
+    public int TelnetPortBase { get; set; } = 7300;
+    public bool TelnetClusterEnabled { get; set; } = true;
+
+    // ── Spot forwarding ───────────────────────────────────────────────────────
+
+    public bool SpotForwardingEnabled { get; set; } = true;
+    public int SpotLifetimeSeconds { get; set; } = 300;
+    public string SpotColor { get; set; } = "#FF00FFFF";
+    public string SpotBackgroundColor { get; set; } = "#00000000";
 
     // ── Main window placement ─────────────────────────────────────────────────
 

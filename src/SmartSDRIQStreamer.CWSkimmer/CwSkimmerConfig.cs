@@ -32,6 +32,7 @@ public sealed record CwSkimmerConfig
     public int    TelnetPort              { get; init; } = 7310;
     public bool   TelnetPasswordRequired  { get; init; } = false;
     public string TelnetPassword          { get; init; } = "";
+    public bool   TelnetClusterEnabled    { get; init; } = true;
 
     /// <summary>
     /// Slice VFO frequency in MHz at launch time.

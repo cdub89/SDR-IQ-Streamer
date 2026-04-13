@@ -161,13 +161,16 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                 config.TelnetPassword,
                 ct);
 
-            // Sync initial LO and VFO immediately after connect so CW Skimmer
-            // starts on the correct band/frequency context.
-            if (initialLoFreqHz > 0)
-                await _telnet.SendLoFreqAsync(initialLoFreqHz, ct);
+            if (config.TelnetClusterEnabled)
+            {
+                // Sync initial LO and VFO immediately after connect so CW Skimmer
+                // starts on the correct band/frequency context.
+                if (initialLoFreqHz > 0)
+                    await _telnet.SendLoFreqAsync(initialLoFreqHz, ct);
 
-            if (initialSliceFreqMHz > 0)
-                await _telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
+                if (initialSliceFreqMHz > 0)
+                    await _telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

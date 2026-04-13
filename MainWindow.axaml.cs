@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Controls.Primitives;
 
 namespace SDRIQStreamer.App;
 
@@ -68,6 +71,84 @@ public partial class MainWindow : Window
 
         if (files.Count > 0 && DataContext is MainWindowViewModel vm)
             vm.CwSkimmerIniPath = files[0].Path.LocalPath;
+    }
+
+    private void OnOpenSpotTextColorMenu(object? sender, RoutedEventArgs e)
+    {
+        OpenSpotColorMenu(sender as Control, isBackground: false);
+    }
+
+    private void OnOpenSpotBackgroundColorMenu(object? sender, RoutedEventArgs e)
+    {
+        OpenSpotColorMenu(sender as Control, isBackground: true);
+    }
+
+    private void OpenSpotColorMenu(Control? anchor, bool isBackground)
+    {
+        if (anchor is null || DataContext is not MainWindowViewModel vm)
+            return;
+
+        var options = isBackground ? vm.SpotBackgroundColorOptions : vm.SpotColorOptions;
+        var swatchPanel = new UniformGrid
+        {
+            Columns = 4,
+            Rows = 2,
+            Margin = new Thickness(1)
+        };
+
+        foreach (var option in options)
+        {
+            var selectedOption = option;
+            var button = new Button
+            {
+                Content = CreateColorSwatchHeader(selectedOption.Hex),
+                Width = 22,
+                Height = 20,
+                Padding = new Thickness(0),
+                Margin = new Thickness(1, 1, 1, 2),
+                HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center
+            };
+            button.Click += (_, _) =>
+            {
+                if (isBackground)
+                    vm.SpotSelectedBackgroundColorOption = selectedOption;
+                else
+                    vm.SpotSelectedColorOption = selectedOption;
+
+                if (FlyoutBase.GetAttachedFlyout(anchor) is Flyout currentFlyout)
+                    currentFlyout.Hide();
+            };
+            swatchPanel.Children.Add(button);
+        }
+
+        var flyout = new Flyout
+        {
+            Content = swatchPanel,
+            Placement = PlacementMode.BottomEdgeAlignedLeft
+        };
+        flyout.FlyoutPresenterClasses.Add("compact-swatch-flyout");
+        FlyoutBase.SetAttachedFlyout(anchor, flyout);
+        flyout.ShowAt(anchor);
+    }
+
+    private static Control CreateColorSwatchHeader(string hex)
+    {
+        var fill = Color.TryParse(hex, out var parsed)
+            ? (IBrush)new SolidColorBrush(parsed)
+            : Brushes.Transparent;
+
+        return new Border
+        {
+            Width = 18,
+            Height = 12,
+            Background = fill,
+            BorderBrush = Brushes.DimGray,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(2),
+            Margin = new Thickness(0),
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+        };
     }
 
 

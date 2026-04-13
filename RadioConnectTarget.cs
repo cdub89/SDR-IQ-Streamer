@@ -9,5 +9,14 @@ public sealed record RadioConnectTarget(DiscoveredRadio Radio, string Station)
 {
     public const string UnknownStation = "(unknown)";
 
-    public string DisplayLabel => $"{Radio.DisplayLabel}  |  Station: {Station}";
+    public string DisplayLabel
+    {
+        get
+        {
+            var radioName = string.IsNullOrWhiteSpace(Radio.Nickname)
+                ? Radio.Model
+                : Radio.Nickname;
+            return $"{radioName}  {Radio.IP}  |  Station: {Station}";
+        }
+    }
 }

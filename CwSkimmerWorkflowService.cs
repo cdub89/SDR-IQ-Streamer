@@ -57,7 +57,8 @@ public sealed class CwSkimmerWorkflowService
             ConnectDelaySeconds = _settings.ConnectDelaySeconds,
             LaunchDelaySeconds = _settings.LaunchDelaySeconds,
             Callsign = ResolveTelnetCallsign(),
-            TelnetPort = 7300 + (stream.DAXIQChannel * 10),
+            TelnetPort = _settings.TelnetPortBase + (stream.DAXIQChannel * 10),
+            TelnetClusterEnabled = _settings.TelnetClusterEnabled,
             InitialSliceFreqMHz = slice?.FreqMHz ?? 0,
             InitialLoFreqHz = centerFreqHz,
         };

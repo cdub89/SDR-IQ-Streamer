@@ -76,10 +76,10 @@ dotnet test tests
 - **Phase 2.2 (CW launch)**: COMPLETE — launch path and validated DAX device mappings are in place.
 - **Phase 2.3 (Runtime sync)**: COMPLETE for alpha-2 baseline — bidirectional QSY and runtime LO/QSY sync are functioning, including multi-station control gating.
 - **Phase 3 (Polish / hardening)**: IN PROGRESS — long-run stability, persistence edge cases, and UX/error refinement.
-- **Phase 3.1 (Bridge spots)**: UPCOMING — add spot forwarding from the Streamer/CW Skimmer bridge into the radio spot workflow.
+- **Phase 3.1 (Bridge spots)**: COMPLETE (baseline) — CW Skimmer spots are parsed and forwarded to radio spots with configurable enable/disable, lifetime, text color, and background color.
 - **Phase 3.2 (RIT fine tuning sync)**: UPCOMING — propagate radio RIT fine-tuning offsets to CW Skimmer so receive tuning can move by small Hz offsets without changing transmit slice frequency.
 - **Phase 3.3 (Network quality monitor)**: UPCOMING — display radio-reported `current RTT` (real-time round-trip latency between station and radio) and `max RTT` (highest RTT value since reset).
-- **Phase 3.4 (Configuration pages)**: UPCOMING — add settings pages for CW Skimmer path and CW Skimmer Radio/Audio/Network tab parameters managed by the app.
+- **Phase 3.4 (Configuration pages)**: IN PROGRESS — tabbed `Config` and `Logs` views are in place with CW Skimmer path controls, spot controls, and Telnet INI/status visibility; additional refinements continue.
 - **Phase 3.5 (Operating page simplification)**: ITERATIVE ACROSS PHASE 3 — continuously polish the main operating page so it shows only essential operator information while 3.1-3.4 are delivered.
 
 ## Notes

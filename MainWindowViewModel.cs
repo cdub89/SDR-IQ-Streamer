@@ -84,10 +84,68 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _isCwSkimmerRunning;
 
+    [ObservableProperty]
+    private string _telnetCallsign = string.Empty;
+
+    [ObservableProperty]
+    private int _connectDelaySeconds = 5;
+
+    [ObservableProperty]
+    private int _launchDelaySeconds = 3;
+
+    [ObservableProperty]
+    private int _telnetPortBase = 7300;
+
+    [ObservableProperty]
+    private bool _telnetClusterEnabled = true;
+
+    [ObservableProperty]
+    private string _telnetIniSummaryText = string.Empty;
+
+    [ObservableProperty]
+    private bool _spotForwardingEnabled = true;
+
+    [ObservableProperty]
+    private int _spotLifetimeSeconds = 300;
+
+    [ObservableProperty]
+    private string _spotColor = "#FF00FFFF";
+
+    [ObservableProperty]
+    private string _spotBackgroundColor = "#00000000";
+
+    [ObservableProperty]
+    private SpotColorOption? _spotSelectedColorOption;
+    public IReadOnlyList<SpotColorOption> SpotColorOptions { get; } =
+    [
+        new SpotColorOption("Red", "#FFFF0000"),
+        new SpotColorOption("Green", "#FF008000"),
+        new SpotColorOption("Blue", "#FF0000FF"),
+        new SpotColorOption("Yellow", "#FFFFFF00"),
+        new SpotColorOption("Orange", "#FFFFA500"),
+        new SpotColorOption("Purple", "#FF800080"),
+        new SpotColorOption("Cyan", "#FF00FFFF"),
+        new SpotColorOption("White", "#FFFFFFFF"),
+    ];
+
+    [ObservableProperty]
+    private SpotColorOption? _spotSelectedBackgroundColorOption;
+    public IReadOnlyList<SpotColorOption> SpotBackgroundColorOptions { get; } =
+    [
+        new SpotColorOption("Transparent", "#00000000"),
+        new SpotColorOption("Red", "#66FF0000"),
+        new SpotColorOption("Green", "#6600FF00"),
+        new SpotColorOption("Blue", "#660000FF"),
+        new SpotColorOption("Yellow", "#66FFFF00"),
+        new SpotColorOption("Orange", "#66FFA500"),
+        new SpotColorOption("Purple", "#66800080"),
+        new SpotColorOption("Cyan", "#6600FFFF"),
+    ];
+
     public ObservableCollection<string> FooterStatusLines { get; } = new();
     private readonly Dictionary<int, string> _lastCwDevicePreviewByChannel = new();
+    private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
     private CancellationTokenSource? _sliceSyncCts;
-    private CancellationTokenSource? _loSyncCts;
     private readonly object _syncDampenGate = new();
     private double _lastOutboundQsyMHz;
     private DateTime _lastOutboundQsyUtc;
@@ -98,11 +156,11 @@ public partial class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan EchoSuppressWindow = TimeSpan.FromMilliseconds(700);
     private const double DuplicateClickToleranceMHz = 0.000005; // 5 Hz
     private static readonly TimeSpan DuplicateClickWindow = TimeSpan.FromMilliseconds(250);
-    private const string CwSkimmerSpotColor = "#FF00FFFF";
-    private const string CwSkimmerSpotBackgroundColor = "#66000000";
-
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
+
+    [ObservableProperty]
+    private string _latestFooterEvent = string.Empty;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -178,6 +236,18 @@ public partial class MainWindowViewModel : ObservableObject
         // Load persisted settings
         CwSkimmerExePath = _settings.CwSkimmerExePath;
         CwSkimmerIniPath = _settings.CwSkimmerIniPath;
+        TelnetCallsign = _settings.Callsign;
+        ConnectDelaySeconds = _settings.ConnectDelaySeconds;
+        LaunchDelaySeconds = _settings.LaunchDelaySeconds;
+        TelnetPortBase = _settings.TelnetPortBase;
+        TelnetClusterEnabled = _settings.TelnetClusterEnabled;
+        UpdateTelnetIniSummary();
+        SpotForwardingEnabled = _settings.SpotForwardingEnabled;
+        SpotLifetimeSeconds = _settings.SpotLifetimeSeconds;
+        SpotColor = _settings.SpotColor;
+        SpotBackgroundColor = _settings.SpotBackgroundColor;
+        UpdateSpotColorSelection(SpotColor);
+        UpdateSpotBackgroundColorSelection(SpotBackgroundColor);
 
         _discovery.Start();
     }
@@ -261,6 +331,7 @@ public partial class MainWindowViewModel : ObservableObject
                 AvgDAXKbps = 0;
                 DaxStreamingSummary = "DAX Streaming : 0.0 Mbps (0 kbps)";
                 _lastCwDevicePreviewByChannel.Clear();
+                _lastLoCenterHzByChannel.Clear();
                 AddStreamerStatus("Disconnected.");
             }
         });
@@ -298,13 +369,22 @@ public partial class MainWindowViewModel : ObservableObject
         RefreshAllPanStreamSummaries();
         RefreshCwSkimmerDeviceInfo(normalized.DAXIQChannel);
 
-        // Sync LO frequency with CW Skimmer if it's running and the centre freq changed
-        if (IsCwSkimmerRunning &&
+        // Adaptive pan-center LO sync: only re-center CW Skimmer when pan center
+        // moves beyond half the stream sample-rate bandwidth.
+        if (TelnetClusterEnabled &&
+            IsCwSkimmerRunning &&
             normalized.CenterFreqMHz > 0 &&
+            normalized.SampleRate > 0 &&
             IsOwnStationPanChannel(normalized.DAXIQChannel))
         {
-            var freqHz = (long)(normalized.CenterFreqMHz * 1_000_000);
-            QueueLoSync(freqHz);
+            var centerHz = (long)Math.Round(normalized.CenterFreqMHz * 1_000_000d);
+            var halfBandwidthHz = normalized.SampleRate / 2L;
+
+            if (ShouldResyncLoForPanCenterMove(normalized.DAXIQChannel, centerHz, halfBandwidthHz))
+            {
+                _ = _launcher.UpdateLoFreqAsync(centerHz);
+                AddTelnetStatus($"Adaptive LO sync: ch {normalized.DAXIQChannel} center moved > {halfBandwidthHz} Hz.");
+            }
         }
     }
 
@@ -403,7 +483,10 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         // Keep CW Skimmer's main window VFO in sync with the slice frequency
-        if (IsCwSkimmerRunning && slice.FreqMHz > 0 && IsOwnStationSlice(slice))
+        if (TelnetClusterEnabled &&
+            IsCwSkimmerRunning &&
+            slice.FreqMHz > 0 &&
+            IsOwnStationSlice(slice))
             QueueSliceSync(slice.FreqMHz);
     }
 
@@ -537,7 +620,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     private async Task PublishSkimmerSpotAsync(CwSkimmerSpotInfo spot)
     {
-        if (!IsConnected || spot.FrequencyKhz <= 0 || string.IsNullOrWhiteSpace(spot.Callsign))
+        if (!IsConnected || !SpotForwardingEnabled || spot.FrequencyKhz <= 0 || string.IsNullOrWhiteSpace(spot.Callsign))
             return;
 
         var commentParts = new List<string>();
@@ -559,9 +642,9 @@ public partial class MainWindowViewModel : ObservableObject
             SpotterCallsign: sourceBaseCall,
             Comment: comment,
             Mode: "CW",
-            Color: CwSkimmerSpotColor,
-            BackgroundColor: CwSkimmerSpotBackgroundColor,
-            LifetimeSeconds: 300);
+            Color: NormalizeSpotColor(SpotColor),
+            BackgroundColor: NormalizeSpotBackgroundColor(SpotBackgroundColor),
+            LifetimeSeconds: Math.Max(30, SpotLifetimeSeconds));
 
         var payloadSummary =
             $"call={radioSpot.Callsign}, freq_mhz={radioSpot.RxFrequencyMHz:F6}, source={radioSpot.Source}, " +
@@ -601,8 +684,79 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.CwSkimmerIniPath = value;
     }
 
+    partial void OnTelnetCallsignChanged(string value)
+    {
+        _settings.Callsign = value;
+        UpdateTelnetIniSummary();
+    }
+
+    partial void OnConnectDelaySecondsChanged(int value)
+    {
+        _settings.ConnectDelaySeconds = Math.Max(0, value);
+    }
+
+    partial void OnLaunchDelaySecondsChanged(int value)
+    {
+        _settings.LaunchDelaySeconds = Math.Max(0, value);
+    }
+
+    partial void OnTelnetPortBaseChanged(int value)
+    {
+        _settings.TelnetPortBase = Math.Max(1, value);
+        UpdateTelnetIniSummary();
+    }
+
+    partial void OnTelnetClusterEnabledChanged(bool value)
+    {
+        _settings.TelnetClusterEnabled = value;
+        UpdateTelnetIniSummary();
+    }
+
+    partial void OnSpotForwardingEnabledChanged(bool value)
+    {
+        _settings.SpotForwardingEnabled = value;
+    }
+
+    partial void OnSpotLifetimeSecondsChanged(int value)
+    {
+        _settings.SpotLifetimeSeconds = Math.Max(30, value);
+    }
+
+    partial void OnSpotColorChanged(string value)
+    {
+        var normalized = NormalizeSpotColor(value);
+        _settings.SpotColor = normalized;
+        UpdateSpotColorSelection(normalized);
+    }
+
+    partial void OnSpotBackgroundColorChanged(string value)
+    {
+        var normalized = NormalizeSpotBackgroundColor(value);
+        _settings.SpotBackgroundColor = normalized;
+        UpdateSpotBackgroundColorSelection(normalized);
+    }
+
+    partial void OnSpotSelectedColorOptionChanged(SpotColorOption? value)
+    {
+        if (value is null)
+            return;
+
+        if (!string.Equals(SpotColor, value.Hex, StringComparison.OrdinalIgnoreCase))
+            SpotColor = value.Hex;
+    }
+
+    partial void OnSpotSelectedBackgroundColorOptionChanged(SpotColorOption? value)
+    {
+        if (value is null)
+            return;
+
+        if (!string.Equals(SpotBackgroundColor, value.Hex, StringComparison.OrdinalIgnoreCase))
+            SpotBackgroundColor = value.Hex;
+    }
+
     private void AddFooterStatus(string message)
     {
+        LatestFooterEvent = message;
         FooterStatusText = _footerStatusBuffer.Add(message);
     }
 
@@ -701,22 +855,161 @@ public partial class MainWindowViewModel : ObservableObject
         return null;
     }
 
-    private void QueueLoSync(long freqHz)
+    private static string NormalizeSpotColor(string color)
     {
-        var cts = ReplaceSyncCts(ref _loSyncCts);
-        _ = Task.Run(async () =>
+        var trimmed = string.IsNullOrWhiteSpace(color)
+            ? string.Empty
+            : color.Trim().ToUpperInvariant();
+
+        if (trimmed.Length == 9 && trimmed.StartsWith("#") &&
+            trimmed.Skip(1).All(Uri.IsHexDigit))
         {
-            try
+            return trimmed;
+        }
+
+        return "#FF00FFFF";
+    }
+
+    private static string NormalizeSpotBackgroundColor(string color)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(color)
+            ? string.Empty
+            : color.Trim().ToUpperInvariant();
+
+        if (trimmed.Length == 9 && trimmed.StartsWith("#") &&
+            trimmed.Skip(1).All(Uri.IsHexDigit))
+        {
+            return trimmed;
+        }
+
+        return "#00000000";
+    }
+
+    private void UpdateSpotColorSelection(string colorHex)
+    {
+        var normalized = NormalizeSpotColor(colorHex);
+        var match = SpotColorOptions.FirstOrDefault(c =>
+            string.Equals(c.Hex, normalized, StringComparison.OrdinalIgnoreCase));
+
+        match ??= SpotColorOptions.FirstOrDefault(c => c.Name == "Cyan");
+        if (match is not null && !Equals(SpotSelectedColorOption, match))
+            SpotSelectedColorOption = match;
+    }
+
+    private void UpdateSpotBackgroundColorSelection(string colorHex)
+    {
+        var normalized = NormalizeSpotBackgroundColor(colorHex);
+        var match = SpotBackgroundColorOptions.FirstOrDefault(c =>
+            string.Equals(c.Hex, normalized, StringComparison.OrdinalIgnoreCase));
+
+        match ??= SpotBackgroundColorOptions.FirstOrDefault(c => c.Name == "Transparent");
+        if (match is not null && !Equals(SpotSelectedBackgroundColorOption, match))
+            SpotSelectedBackgroundColorOption = match;
+    }
+
+    private void UpdateTelnetIniSummary()
+    {
+        if (TryReadLatestTelnetIniSection(out var sourceFileName, out var telnetLines))
+        {
+            TelnetIniSummaryText = string.Join(Environment.NewLine,
+            [
+                $"INI file: {sourceFileName}",
+                "",
+                "[Telnet]",
+                .. telnetLines
+            ]);
+            return;
+        }
+
+        var callsign = string.IsNullOrWhiteSpace(TelnetCallsign) ? "(auto)" : TelnetCallsign.Trim();
+        var portBase = Math.Max(1, TelnetPortBase);
+        TelnetIniSummaryText = string.Join(Environment.NewLine,
+        [
+            "INI file: (none generated yet)",
+            "",
+            "[Telnet]",
+            $"Port={portBase} + (DAXIQ channel x 10)",
+            "PasswordRequired=0",
+            "Password=",
+            "CqOnly=0",
+            "AllowAnn=1",
+            "AnnUserOnly=0",
+            "AnnUser=",
+            "TelnetSrvEnabled=1",
+            "UdpSourceName=CW Skimmer",
+            "UdpAddress=127.0.0.1",
+            "UdpPort=13064",
+            "UdpEnabled=0",
+            "",
+            $"LoginCallsign={callsign}",
+            $"ClusterCommands={(TelnetClusterEnabled ? 1 : 0)}",
+        ]);
+    }
+
+    private static bool TryReadLatestTelnetIniSection(out string sourceFileName, out IReadOnlyList<string> telnetLines)
+    {
+        sourceFileName = string.Empty;
+        telnetLines = [];
+
+        try
+        {
+            var iniDir = ResolveCwSkimmerIniDirPath();
+            if (!Directory.Exists(iniDir))
+                return false;
+
+            var iniFile = new DirectoryInfo(iniDir)
+                .GetFiles("CwSkimmer-ch*.ini", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (iniFile is null)
+                return false;
+
+            sourceFileName = iniFile.Name;
+            var lines = File.ReadAllLines(iniFile.FullName);
+            var start = Array.FindIndex(lines, l =>
+                string.Equals(l.Trim(), "[Telnet]", StringComparison.OrdinalIgnoreCase));
+            if (start < 0)
+                return false;
+
+            var captured = new List<string>();
+            for (var i = start + 1; i < lines.Length; i++)
             {
-                await Task.Delay(120, cts.Token);
-                await _launcher.UpdateLoFreqAsync(freqHz);
+                var line = lines[i].Trim();
+                if (line.StartsWith("[") && line.EndsWith("]"))
+                    break;
+                if (line.Length == 0)
+                    continue;
+                captured.Add(line);
             }
-            catch (OperationCanceledException) { }
-        });
+
+            telnetLines = captured.Count == 0 ? [] : captured;
+            return captured.Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string ResolveCwSkimmerIniDirPath()
+    {
+        var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
+            ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+
+        if (repoRoot is not null)
+            return Path.Combine(repoRoot.FullName, "artifacts", "cwskimmer", "ini");
+
+        var appDataRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SDRIQStreamer");
+        return Path.Combine(appDataRoot, "artifacts", "cwskimmer", "ini");
     }
 
     private void QueueSliceSync(double freqMHz)
     {
+        if (!TelnetClusterEnabled)
+            return;
+
         var cts = ReplaceSyncCts(ref _sliceSyncCts);
         _ = Task.Run(async () =>
         {
@@ -863,6 +1156,21 @@ public partial class MainWindowViewModel : ObservableObject
             string.Equals(p.ClientStation, SelectedControlStation, StringComparison.OrdinalIgnoreCase));
     }
 
+    private bool ShouldResyncLoForPanCenterMove(int channel, long centerHz, long halfBandwidthHz)
+    {
+        if (!_lastLoCenterHzByChannel.TryGetValue(channel, out var previousHz))
+        {
+            _lastLoCenterHzByChannel[channel] = centerHz;
+            return false;
+        }
+
+        if (Math.Abs(centerHz - previousHz) <= Math.Max(1, halfBandwidthHz))
+            return false;
+
+        _lastLoCenterHzByChannel[channel] = centerHz;
+        return true;
+    }
+
     private void EnsureSelectedControlStation()
     {
         if (string.Equals(SelectedControlStation, RadioConnectTarget.UnknownStation, StringComparison.OrdinalIgnoreCase))
@@ -931,3 +1239,5 @@ public partial class MainWindowViewModel : ObservableObject
 
     private static void UIPost(System.Action action) => Dispatcher.UIThread.Post(action);
 }
+
+public sealed record SpotColorOption(string Name, string Hex);
