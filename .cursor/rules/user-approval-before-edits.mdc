@@ -1,0 +1,16 @@
+---
+description: Require user approval before making code edits
+alwaysApply: true
+---
+
+# Approval Gate Before Edits
+
+- Do not modify files unless the user explicitly approves the proposed change first.
+- For implementation requests, first provide a concise review plan:
+  - files to change
+  - behavior change
+  - risks/side effects
+- Ask for approval before calling any editing tool.
+- If approval has not been given, stay in read-only mode (analysis, code review, diagnostics).
+- Approval can be one direct confirmation (for example: "approved", "proceed", or equivalent).
+- If scope changes after approval, pause and request a new approval for the changed scope.
