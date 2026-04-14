@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -24,6 +27,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly FooterStatusBuffer _footerStatusBuffer;
     private readonly CwSkimmerWorkflowService _cwSkimmerWorkflow;
+    private static readonly (string ReleaseTag, string CommitHash, string Display) s_appBuildInfo =
+        ResolveAppBuildInfo();
 
     // ── Discovered radios ─────────────────────────────────────────────────────
 
@@ -162,6 +167,11 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private string _latestFooterEvent = string.Empty;
 
+    public string AppReleaseTag => s_appBuildInfo.ReleaseTag;
+    public string AppCommitHash => s_appBuildInfo.CommitHash;
+    public string AppBuildDisplay => s_appBuildInfo.Display;
+    public string WindowTitle => $"SDR-IQ-Streamer {AppBuildDisplay}";
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public MainWindowViewModel(IRadioDiscovery discovery, IRadioConnection connection,
@@ -249,6 +259,7 @@ public partial class MainWindowViewModel : ObservableObject
         UpdateSpotColorSelection(SpotColor);
         UpdateSpotBackgroundColorSelection(SpotBackgroundColor);
 
+        AddStreamerStatus($"Release: {AppReleaseTag} | Commit: {AppCommitHash}");
         _discovery.Start();
     }
 
@@ -1003,6 +1014,126 @@ public partial class MainWindowViewModel : ObservableObject
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SDRIQStreamer");
         return Path.Combine(appDataRoot, "artifacts", "cwskimmer", "ini");
+    }
+
+    private static (string ReleaseTag, string CommitHash, string Display) ResolveAppBuildInfo()
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+        var informationalVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
+        var releaseTag = ResolveReleaseTag(assembly, informationalVersion) ?? "dev";
+
+        var commit = ExtractCommitHash(informationalVersion)
+            ?? ExtractCommitHash(
+                assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+                    .FirstOrDefault(x =>
+                        string.Equals(x.Key, "SourceRevisionId", StringComparison.OrdinalIgnoreCase))
+                    ?.Value)
+            ?? "unknown";
+
+        var display = commit == "unknown"
+            ? $"v{releaseTag}"
+            : $"v{releaseTag} ({commit})";
+        return (releaseTag, commit, display);
+    }
+
+    private static string? ResolveReleaseTag(Assembly assembly, string? informationalVersion)
+    {
+        // Prefer explicit git tags so runtime log reflects release labels like alpha.2/alpha.3.
+        var exactTag = TryGetGitTag(pointsAtHead: true);
+        if (!string.IsNullOrWhiteSpace(exactTag))
+            return exactTag;
+
+        var latestTag = TryGetGitTag(pointsAtHead: false);
+        if (!string.IsNullOrWhiteSpace(latestTag))
+            return latestTag;
+
+        return ExtractVersion(informationalVersion)
+            ?? assembly.GetName().Version?.ToString(3);
+    }
+
+    private static string? ExtractVersion(string? informationalVersion)
+    {
+        if (string.IsNullOrWhiteSpace(informationalVersion))
+            return null;
+
+        var plusIndex = informationalVersion.IndexOf('+');
+        var version = plusIndex >= 0
+            ? informationalVersion[..plusIndex]
+            : informationalVersion;
+
+        version = version.Trim();
+        return version.Length == 0 ? null : version;
+    }
+
+    private static string? ExtractCommitHash(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+            return null;
+
+        var match = Regex.Match(source, "[0-9a-fA-F]{7,40}");
+        if (!match.Success)
+            return null;
+
+        var hash = match.Value.ToLowerInvariant();
+        return hash.Length <= 8 ? hash : hash[..8];
+    }
+
+    private static string? TryGetGitTag(bool pointsAtHead)
+    {
+        try
+        {
+            var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
+                ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+            var workingDir = repoRoot?.FullName ?? Environment.CurrentDirectory;
+
+            var args = pointsAtHead
+                ? "tag --points-at HEAD --sort=-v:refname"
+                : "describe --tags --abbrev=0";
+
+            var result = RunGit(args, workingDir);
+            if (string.IsNullOrWhiteSpace(result))
+                return null;
+
+            if (!pointsAtHead)
+                return result;
+
+            // If multiple tags point at HEAD, prefer the first sorted highest version.
+            var firstLine = result
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            return string.IsNullOrWhiteSpace(firstLine) ? null : firstLine.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? RunGit(string arguments, string workingDirectory)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(psi);
+        if (process is null)
+            return null;
+
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit(2000);
+        if (process.ExitCode != 0)
+            return null;
+
+        return output.Trim();
     }
 
     private void QueueSliceSync(double freqMHz)

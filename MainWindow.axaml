@@ -8,7 +8,7 @@
         x:Class="SDRIQStreamer.App.MainWindow"
         x:DataType="local:MainWindowViewModel"
         x:Name="Root"
-        Title="SDR-IQ-Streamer"
+        Title="{Binding WindowTitle}"
         Width="420" SizeToContent="Height"
         MinWidth="360" MinHeight="220">
 
