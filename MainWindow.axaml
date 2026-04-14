@@ -3,7 +3,6 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SDRIQStreamer.App"
-        xmlns:flex="clr-namespace:SDRIQStreamer.FlexRadio;assembly=SDRIQStreamer.FlexRadio"
         mc:Ignorable="d" d:DesignWidth="700" d:DesignHeight="620"
         x:Class="SDRIQStreamer.App.MainWindow"
         x:DataType="local:MainWindowViewModel"
@@ -112,9 +111,30 @@
                                                         <ItemsControl ItemsSource="{Binding Slices}" Margin="8,1,0,0">
                                                             <ItemsControl.ItemTemplate>
                                                                 <DataTemplate x:DataType="local:SliceViewModel">
-                                                                    <TextBlock Text="{Binding DisplayLabel}"
-                                                                               FontSize="11"
-                                                                               VerticalAlignment="Center"/>
+                                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                                                        <TextBlock Grid.Column="0"
+                                                                                   Text="{Binding DisplayLabel}"
+                                                                                   FontSize="11"
+                                                                                   VerticalAlignment="Center"/>
+                                                                        <Button Grid.Column="1"
+                                                                                Content="Start Skimmer"
+                                                                                MinWidth="96"
+                                                                                Height="20"
+                                                                                FontSize="10"
+                                                                                Padding="8,0"
+                                                                                Command="{Binding #Root.((local:MainWindowViewModel)DataContext).LaunchCwSkimmerForSliceCommand}"
+                                                                                CommandParameter="{Binding}"
+                                                                                IsVisible="{Binding !IsSkimmerRunning}"/>
+                                                                        <Button Grid.Column="1"
+                                                                                Content="Stop Skimmer"
+                                                                                MinWidth="96"
+                                                                                Height="20"
+                                                                                FontSize="10"
+                                                                                Padding="8,0"
+                                                                                Command="{Binding #Root.((local:MainWindowViewModel)DataContext).StopCwSkimmerForSliceCommand}"
+                                                                                CommandParameter="{Binding}"
+                                                                                IsVisible="{Binding IsSkimmerRunning}"/>
+                                                                    </Grid>
                                                                 </DataTemplate>
                                                             </ItemsControl.ItemTemplate>
                                                         </ItemsControl>
@@ -124,46 +144,6 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                 </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <TextBlock Text="{Binding StreamRequestStatus}"
-                               FontSize="11" Foreground="DarkOrange"
-                               IsVisible="{Binding StreamRequestStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                               Margin="0,2,0,0"/>
-
-                    <Separator Margin="0,8,0,4" Background="#DDD"/>
-                    <TextBlock Text="CW Skimmer" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
-
-                    <ItemsControl ItemsSource="{Binding DaxIQStreams}" Margin="0,4,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="flex:DaxIQStreamInfo">
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,1,0,1">
-                                    <TextBlock Grid.Column="0"
-                                               Text="{Binding SkimmerRowLabel}"
-                                               FontSize="11"
-                                               Foreground="DarkCyan"
-                                               VerticalAlignment="Center"/>
-                                    <Button Grid.Column="1"
-                                            Content="Launch"
-                                            MinWidth="56"
-                                            Height="20"
-                                            FontSize="10"
-                                            Padding="8,0"
-                                            Command="{Binding #Root.((local:MainWindowViewModel)DataContext).LaunchCwSkimmerForChannelCommand}"
-                                            CommandParameter="{Binding}"
-                                            IsVisible="{Binding !IsSkimmerRunning}"/>
-                                    <Button Grid.Column="1"
-                                            Content="Stop"
-                                            MinWidth="56"
-                                            Height="20"
-                                            FontSize="10"
-                                            Padding="8,0"
-                                            Command="{Binding #Root.((local:MainWindowViewModel)DataContext).StopCwSkimmerForChannelCommand}"
-                                            CommandParameter="{Binding}"
-                                            IsVisible="{Binding IsSkimmerRunning}"/>
-                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -282,21 +262,76 @@
                     </Grid>
 
                     <Separator Margin="0,4,0,0" Background="#DDD"/>
-                    <TextBlock Text="Telnet cluster (from INI)" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,0,0,2">
+                        <TextBlock Grid.Column="0"
+                                   Text="Streamer INI Files"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="Gray"
+                                   VerticalAlignment="Center"/>
+                        <Button Grid.Column="1"
+                                Content="Open Folder"
+                                Height="22"
+                                FontSize="9"
+                                Padding="8,0"
+                                Command="{Binding OpenStreamerIniFolderCommand}"
+                                IsEnabled="{Binding HasStreamerIniFolder}"/>
+                    </Grid>
                     </StackPanel>
-                    <Border BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="4" Margin="0,0,0,2">
-                        <TextBox Text="{Binding TelnetIniSummaryText}"
-                                 IsReadOnly="True"
-                                 AcceptsReturn="True"
-                                 FontFamily="Consolas"
-                                 FontSize="10"
-                                 Foreground="DarkSlateGray"
-                                 BorderThickness="0"
-                                 Background="Transparent"
-                                 TextWrapping="NoWrap"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Hidden"
-                                 ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-                    </Border>
+                    <StackPanel Spacing="4" Margin="0,0,0,2">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,2,0,0">
+                            <TextBlock Grid.Column="0"
+                                       Text="ch 1"
+                                       Width="28"
+                                       FontSize="10"
+                                       VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding StreamerIniCh1PathText}"
+                                     IsReadOnly="True"
+                                     FontFamily="Consolas"
+                                     FontSize="10"
+                                     Foreground="DarkSlateGray"
+                                     BorderThickness="1"
+                                     BorderBrush="#E3E6EA"
+                                     Background="Transparent"
+                                     TextWrapping="NoWrap"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     VerticalContentAlignment="Center"/>
+                            <Button Grid.Column="2"
+                                    Content="Open ch 1"
+                                    Height="22"
+                                    FontSize="9"
+                                    Padding="8,0"
+                                    Command="{Binding OpenStreamerIniCh1FileCommand}"
+                                    IsEnabled="{Binding HasStreamerIniCh1File}"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,0,0,2">
+                            <TextBlock Grid.Column="0"
+                                       Text="ch 2"
+                                       Width="28"
+                                       FontSize="10"
+                                       VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding StreamerIniCh2PathText}"
+                                     IsReadOnly="True"
+                                     FontFamily="Consolas"
+                                     FontSize="10"
+                                     Foreground="DarkSlateGray"
+                                     BorderThickness="1"
+                                     BorderBrush="#E3E6EA"
+                                     Background="Transparent"
+                                     TextWrapping="NoWrap"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     VerticalContentAlignment="Center"/>
+                            <Button Grid.Column="2"
+                                    Content="Open ch 2"
+                                    Height="22"
+                                    FontSize="9"
+                                    Padding="8,0"
+                                    Command="{Binding OpenStreamerIniCh2FileCommand}"
+                                    IsEnabled="{Binding HasStreamerIniCh2File}"/>
+                        </Grid>
+                    </StackPanel>
 
             </DockPanel>
         </TabItem>

@@ -312,6 +312,12 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             EmitStatus($"Telnet receive error: {ex.Message}");
             MarkDisconnected();
         }
+        catch (ObjectDisposedException ex)
+        {
+            LogDiag($"RX disposed {ex.ObjectName ?? "stream"}");
+            EmitStatus("Telnet receive loop closed.");
+            MarkDisconnected();
+        }
     }
 
     private void ProcessLine(string line)
@@ -499,6 +505,16 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
     private void MarkDisconnected()
     {
+        var readCts = _readCts;
+        _readCts = null;
+        _readTask = null;
+
+        if (readCts is not null)
+        {
+            try { readCts.Cancel(); } catch { }
+            readCts.Dispose();
+        }
+
         try { _writer?.Dispose(); } catch { }
         try { _stream?.Dispose(); } catch { }
         try { _tcp?.Dispose(); } catch { }

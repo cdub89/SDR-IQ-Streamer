@@ -70,9 +70,6 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private string _daxStreamingSummary = "DAX Streaming : 0.0 Mbps (0 kbps)";
 
-    [ObservableProperty]
-    private string _streamRequestStatus = string.Empty;
-
     /// <summary>Station name of our own connected client.</summary>
     public string OwnClientStation { get; private set; } = string.Empty;
     public string SelectedControlStation { get; private set; } = string.Empty;
@@ -81,6 +78,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(LaunchCwSkimmerForChannelCommand))]
+    [NotifyCanExecuteChangedFor(nameof(LaunchCwSkimmerForSliceCommand))]
+    [NotifyCanExecuteChangedFor(nameof(StopCwSkimmerForSliceCommand))]
     private string _cwSkimmerExePath = string.Empty;
 
     [ObservableProperty]
@@ -105,7 +104,31 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _telnetClusterEnabled = true;
 
     [ObservableProperty]
-    private string _telnetIniSummaryText = string.Empty;
+    private string _streamerIniCh1PathText = "(not generated yet)";
+
+    [ObservableProperty]
+    private string _streamerIniCh1Path = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenStreamerIniCh1FileCommand))]
+    private bool _hasStreamerIniCh1File;
+
+    [ObservableProperty]
+    private string _streamerIniCh2PathText = "(not generated yet)";
+
+    [ObservableProperty]
+    private string _streamerIniCh2Path = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenStreamerIniCh2FileCommand))]
+    private bool _hasStreamerIniCh2File;
+
+    [ObservableProperty]
+    private string _streamerIniFolderPath = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenStreamerIniFolderCommand))]
+    private bool _hasStreamerIniFolder;
 
     [ObservableProperty]
     private bool _spotForwardingEnabled = true;
@@ -150,14 +173,12 @@ public partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<string> FooterStatusLines { get; } = new();
     private readonly Dictionary<int, string> _lastCwDevicePreviewByChannel = new();
     private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
-    private CancellationTokenSource? _sliceSyncCts;
+    private readonly Dictionary<int, CancellationTokenSource> _sliceSyncCtsByChannel = new();
     private readonly object _syncDampenGate = new();
     private readonly ThrottledStatusEmitter _ritStatusEmitter;
     private readonly Dictionary<string, (bool RitEnabled, double RitOffsetHz)> _lastRitStateBySlice = new();
-    private double _lastOutboundQsyMHz;
-    private DateTime _lastOutboundQsyUtc;
-    private double _lastInboundClickMHz;
-    private DateTime _lastInboundClickUtc;
+    private readonly Dictionary<int, (double FreqMHz, DateTime Utc)> _lastOutboundQsyByChannel = new();
+    private readonly Dictionary<int, (double FreqMHz, DateTime Utc)> _lastInboundClickByChannel = new();
 
     private const double EchoSuppressToleranceMHz = 0.000010; // 10 Hz
     private static readonly TimeSpan EchoSuppressWindow = TimeSpan.FromMilliseconds(700);
@@ -215,6 +236,9 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 LaunchCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
                 StopCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
+                LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+                StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+                RefreshSliceSkimmerStates();
             });
 
         // Track CW Skimmer process state
@@ -224,21 +248,24 @@ public partial class MainWindowViewModel : ObservableObject
                 IsCwSkimmerRunning = running;
                 LaunchCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
                 StopCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
+                LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+                StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
                 RefreshDaxStreamPanBindings();
+                RefreshSliceSkimmerStates();
                 RefreshAllPanStreamSummaries();
                 if (!running)
                     AddSkimmerStatus("CW Skimmer stopped.");
             });
 
         // Click→tune: when user clicks a signal in CW Skimmer, tune the associated slice
-        _launcher.FrequencyClicked += freqKhz =>
+        _launcher.FrequencyClicked += (daxIqChannel, freqKhz) =>
         {
-            var slice = GetPreferredSliceForTune();
+            var slice = GetPreferredSliceForTune(daxIqChannel);
             if (slice is null) return;
             var rawFreqMHz = freqKhz / 1000.0;
             var clickSnapStepHz = ResolveClickSnapStepHz(slice);
             var snappedFreqMHz = FrequencyMath.SnapMHzToStepHz(rawFreqMHz, clickSnapStepHz);
-            if (ShouldSuppressInboundClick(snappedFreqMHz, clickSnapStepHz))
+            if (ShouldSuppressInboundClick(daxIqChannel, snappedFreqMHz, clickSnapStepHz))
                 return;
 
             _ = _connection.SetSliceFrequencyAsync(slice, snappedFreqMHz);
@@ -247,17 +274,20 @@ public partial class MainWindowViewModel : ObservableObject
                 if (Math.Abs(snappedFreqMHz - rawFreqMHz) >= 0.0000005)
                 {
                     AddTelnetStatus(
-                        $"Click snap (Skimmer): {rawFreqMHz:F6} MHz -> {snappedFreqMHz:F6} MHz (step {clickSnapStepHz} Hz)");
+                        $"ch {daxIqChannel}: Click snap (Skimmer): {rawFreqMHz:F6} MHz -> {snappedFreqMHz:F6} MHz (step {clickSnapStepHz} Hz)");
                 }
 
                 AddTelnetStatus(
-                    $"Click tune (Skimmer): {snappedFreqMHz:F6} MHz -> Slice {slice.Letter} ({slice.ClientStation})");
+                    $"ch {daxIqChannel}: Click tune (Skimmer): {snappedFreqMHz:F6} MHz -> Slice {slice.Letter} ({slice.ClientStation})");
             });
         };
 
         _launcher.TelnetStatusChanged += message =>
             UIPost(() => AddTelnetStatus(message));
-        _launcher.SpotReceived += spot => _ = PublishSkimmerSpotAsync(spot);
+        _launcher.SpotReceived += (daxIqChannel, spot) =>
+        {
+            _ = PublishSkimmerSpotAsync(spot);
+        };
 
         // Load persisted settings
         CwSkimmerExePath = _settings.CwSkimmerExePath;
@@ -351,7 +381,6 @@ public partial class MainWindowViewModel : ObservableObject
                 OwnClientStation = string.Empty;
                 OnPropertyChanged(nameof(OwnClientStation));
                 SetSelectedControlStation(string.Empty);
-                StreamRequestStatus = string.Empty;
                 ClientGroups.Clear();
                 DaxIQStreams.Clear();
                 _radioAvgDaxKbps = 0;
@@ -360,6 +389,20 @@ public partial class MainWindowViewModel : ObservableObject
                 _lastCwDevicePreviewByChannel.Clear();
                 _lastLoCenterHzByChannel.Clear();
                 _lastRitStateBySlice.Clear();
+                lock (_syncDampenGate)
+                {
+                    _lastOutboundQsyByChannel.Clear();
+                    _lastInboundClickByChannel.Clear();
+                }
+                lock (_syncDampenGate)
+                {
+                    foreach (var cts in _sliceSyncCtsByChannel.Values)
+                    {
+                        try { cts.Cancel(); } catch { }
+                        cts.Dispose();
+                    }
+                    _sliceSyncCtsByChannel.Clear();
+                }
                 _ritStatusEmitter.Clear();
                 AddStreamerStatus("Disconnected.");
             }
@@ -378,24 +421,32 @@ public partial class MainWindowViewModel : ObservableObject
 
         UpdateDisplayedDaxKbps();
         RefreshAllPanStreamSummaries();
+        RefreshSliceSkimmerStates();
         RefreshCwSkimmerDeviceInfo(normalized.DAXIQChannel);
     }
 
     private void OnDaxIQStreamRemoved(DaxIQStreamInfo stream)
     {
+        StopSkimmerIfRunningForDisabledChannel(stream.DAXIQChannel, "DAX-IQ stream removed");
+
         var m = DaxIQStreams.FirstOrDefault(x => x.DAXIQChannel == stream.DAXIQChannel);
         if (m is not null) DaxIQStreams.Remove(m);
 
         UpdateDisplayedDaxKbps();
         RefreshAllPanStreamSummaries();
+        RefreshSliceSkimmerStates();
     }
 
     private void OnDaxIQStreamUpdated(DaxIQStreamInfo stream)
     {
+        if (!stream.IsActive)
+            StopSkimmerIfRunningForDisabledChannel(stream.DAXIQChannel, "DAX-IQ stream inactive");
+
         var normalized = NormalizeStreamForPan(stream);
         ReplaceDaxStream(normalized);
         UpdateDisplayedDaxKbps();
         RefreshAllPanStreamSummaries();
+        RefreshSliceSkimmerStates();
         RefreshCwSkimmerDeviceInfo(normalized.DAXIQChannel);
 
         // Adaptive pan-center LO sync: only re-center CW Skimmer when pan center
@@ -408,11 +459,15 @@ public partial class MainWindowViewModel : ObservableObject
         {
             var centerHz = (long)Math.Round(normalized.CenterFreqMHz * 1_000_000d);
             var halfBandwidthHz = normalized.SampleRate / 2L;
-
-            if (ShouldResyncLoForPanCenterMove(normalized.DAXIQChannel, centerHz, halfBandwidthHz))
+            var effectiveRxFreqHz = ResolveEffectiveRxFrequencyHzForChannel(normalized.DAXIQChannel);
+            if (ShouldResyncLoForPanCenterMove(
+                    normalized.DAXIQChannel,
+                    centerHz,
+                    halfBandwidthHz,
+                    effectiveRxFreqHz))
             {
-                _ = _launcher.UpdateLoFreqAsync(centerHz);
-                AddTelnetStatus($"Adaptive LO sync: ch {normalized.DAXIQChannel} center moved > {halfBandwidthHz} Hz.");
+                _ = _launcher.UpdateLoFreqAsync(normalized.DAXIQChannel, centerHz);
+                AddTelnetStatus($"Adaptive LO sync: ch {normalized.DAXIQChannel} center/edge context changed.");
             }
         }
     }
@@ -443,17 +498,30 @@ public partial class MainWindowViewModel : ObservableObject
             group.Panadapters.Add(panGroup);
         }
         RefreshDaxStreamPanBindings();
+        LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+        StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
     private void RemovePan(PanadapterInfo pan)
     {
+        var removedChannel = pan.DAXIQChannel;
+
         var group = ClientGroups.FirstOrDefault(g => g.Station == pan.ClientStation);
         if (group is null) return;
         var entry = group.Panadapters.FirstOrDefault(p => p.Pan.StreamId == pan.StreamId);
         if (entry is not null) group.Panadapters.Remove(entry);
         if (group.Panadapters.Count == 0) ClientGroups.Remove(group);
+
+        if (removedChannel > 0 &&
+            !_connection.Panadapters.Any(p => p.DAXIQChannel == removedChannel && p.StreamId != pan.StreamId))
+        {
+            StopSkimmerIfRunningForDisabledChannel(removedChannel, "panadapter closed");
+        }
+
         RefreshDaxStreamPanBindings();
+        LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+        StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
@@ -464,10 +532,25 @@ public partial class MainWindowViewModel : ObservableObject
         var entry = group.Panadapters.FirstOrDefault(p => p.Pan.StreamId == pan.StreamId);
         if (entry is not null)
         {
+            var oldChannel = entry.Pan.DAXIQChannel;
             entry.Pan = pan;
             UpdatePanStreamSummary(entry);
+            if (oldChannel != pan.DAXIQChannel)
+            {
+                if (oldChannel > 0)
+                    StopSkimmerIfRunningForDisabledChannel(oldChannel, $"pan reassigned from ch {oldChannel} to ch {pan.DAXIQChannel}");
+
+                var running = _launcher.IsChannelRunning(pan.DAXIQChannel);
+                foreach (var sliceVm in entry.Slices)
+                {
+                    sliceVm.UpdateDaxIqChannel(pan.DAXIQChannel);
+                    sliceVm.IsSkimmerRunning = running;
+                }
+            }
         }
         RefreshDaxStreamPanBindings();
+        LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+        StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
@@ -478,9 +561,15 @@ public partial class MainWindowViewModel : ObservableObject
         if (panEntry is null) return;
         if (panEntry.Slices.All(s => s.Slice.Letter != slice.Letter))
         {
-            var vm = new SliceViewModel(slice);
+            var channel = panEntry.Pan.DAXIQChannel;
+            var vm = new SliceViewModel(slice, channel)
+            {
+                IsSkimmerRunning = _launcher.IsChannelRunning(channel)
+            };
             panEntry.Slices.Add(vm);
         }
+        LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+        StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(VisibleClientGroups));
     }
 
@@ -498,7 +587,11 @@ public partial class MainWindowViewModel : ObservableObject
             break;
         }
         if (removed)
+        {
+            LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+            StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(VisibleClientGroups));
+        }
     }
 
     private void UpdateSlice(SliceInfo slice)
@@ -519,7 +612,11 @@ public partial class MainWindowViewModel : ObservableObject
             IsCwSkimmerRunning &&
             effectiveRxFreqMHz > 0 &&
             IsOwnStationSlice(slice))
-            QueueSliceSync(effectiveRxFreqMHz);
+        {
+            var daxIqChannel = ResolveSliceDaxIqChannel(slice);
+            if (daxIqChannel > 0)
+                QueueSliceSync(daxIqChannel, effectiveRxFreqMHz);
+        }
     }
 
     private ClientGroup GetOrCreateClientGroup(string station)
@@ -633,22 +730,180 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task LaunchCwSkimmerForChannelAsync(DaxIQStreamInfo? stream)
     {
         await _cwSkimmerWorkflow.LaunchForChannelAsync(stream, CwSkimmerExePath, AddSkimmerStatus);
+        UpdateTelnetIniSummary();
+        RefreshDaxStreamPanBindings();
+        RefreshSliceSkimmerStates();
     }
 
     private bool CanLaunchCwSkimmerForChannel(DaxIQStreamInfo? stream) =>
         _cwSkimmerWorkflow.CanLaunch(stream, CwSkimmerExePath);
 
+    [RelayCommand(CanExecute = nameof(CanLaunchCwSkimmerForSlice))]
+    private async Task LaunchCwSkimmerForSliceAsync(SliceViewModel? sliceVm)
+    {
+        var stream = ResolveSliceLaunchStream(sliceVm);
+        if (stream is null)
+        {
+            AddSkimmerStatus("Unable to launch: no DAX-IQ stream for this slice.");
+            return;
+        }
+
+        await LaunchCwSkimmerForChannelAsync(stream);
+    }
+
+    private bool CanLaunchCwSkimmerForSlice(SliceViewModel? sliceVm)
+    {
+        var stream = ResolveSliceLaunchStream(sliceVm);
+        return _cwSkimmerWorkflow.CanLaunch(stream, CwSkimmerExePath);
+    }
+
     [RelayCommand(CanExecute = nameof(CanStopCwSkimmerForChannel))]
     private void StopCwSkimmerForChannel(DaxIQStreamInfo? stream)
     {
         _cwSkimmerWorkflow.StopForChannel(stream, AddSkimmerStatus);
+        UpdateTelnetIniSummary();
         LaunchCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
         StopCwSkimmerForChannelCommand.NotifyCanExecuteChanged();
         RefreshDaxStreamPanBindings();
+        RefreshSliceSkimmerStates();
     }
 
     private bool CanStopCwSkimmerForChannel(DaxIQStreamInfo? stream) =>
         _cwSkimmerWorkflow.CanStop(stream);
+
+    [RelayCommand(CanExecute = nameof(CanStopCwSkimmerForSlice))]
+    private void StopCwSkimmerForSlice(SliceViewModel? sliceVm)
+    {
+        var stream = ResolveSliceLaunchStream(sliceVm);
+        if (stream is null)
+        {
+            AddSkimmerStatus("Unable to stop: no DAX-IQ stream for this slice.");
+            return;
+        }
+
+        StopCwSkimmerForChannel(stream);
+    }
+
+    private bool CanStopCwSkimmerForSlice(SliceViewModel? sliceVm)
+    {
+        var stream = ResolveSliceLaunchStream(sliceVm);
+        return _cwSkimmerWorkflow.CanStop(stream);
+    }
+
+    private DaxIQStreamInfo? ResolveSliceLaunchStream(SliceViewModel? sliceVm)
+    {
+        if (sliceVm is null)
+            return null;
+
+        var pan = _connection.Panadapters.FirstOrDefault(p => p.StreamId == sliceVm.Slice.PanadapterStreamId);
+        if (pan is null || pan.DAXIQChannel <= 0)
+            return null;
+
+        var channel = pan.DAXIQChannel;
+        var stream = DaxIQStreams.FirstOrDefault(s => s.DAXIQChannel == channel)
+            ?? _connection.DaxIQStreams.FirstOrDefault(s => s.DAXIQChannel == channel);
+
+        if (stream is not null)
+        {
+            var centerMHz = stream.CenterFreqMHz > 0 ? stream.CenterFreqMHz : pan.CenterFreqMHz;
+            return stream with
+            {
+                CenterFreqMHz = centerMHz,
+                IsSkimmerRunning = _launcher.IsChannelRunning(channel)
+            };
+        }
+
+        // Fallback for command enable/launch when pan has a valid DAX channel
+        // but stream metadata has not populated yet.
+        return new DaxIQStreamInfo(
+            DAXIQChannel: channel,
+            SampleRate: 48000,
+            IsActive: false,
+            CenterFreqMHz: pan.CenterFreqMHz)
+        {
+            IsSkimmerRunning = _launcher.IsChannelRunning(channel)
+        };
+    }
+
+    private void RefreshSliceSkimmerStates()
+    {
+        foreach (var group in ClientGroups)
+        {
+            foreach (var pan in group.Panadapters)
+            {
+                var channel = pan.Pan.DAXIQChannel;
+                var running = _launcher.IsChannelRunning(channel);
+                foreach (var slice in pan.Slices)
+                {
+                    slice.UpdateDaxIqChannel(channel);
+                    slice.IsSkimmerRunning = running;
+                }
+            }
+        }
+
+        LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+        StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
+    }
+
+    private void StopSkimmerIfRunningForDisabledChannel(int daxIqChannel, string reason)
+    {
+        if (daxIqChannel <= 0 || !_launcher.IsChannelRunning(daxIqChannel))
+            return;
+
+        _launcher.Stop(daxIqChannel);
+        AddSkimmerStatus($"Stopped CW Skimmer on channel {daxIqChannel}: {reason}.");
+    }
+
+    [RelayCommand(CanExecute = nameof(CanOpenStreamerIniCh1File))]
+    private void OpenStreamerIniCh1File()
+    {
+        if (!CanOpenStreamerIniCh1File())
+        {
+            UpdateTelnetIniSummary();
+            AddStreamerStatus("Streamer INI file for ch 1 not found yet.");
+            return;
+        }
+
+        TryOpenPath(StreamerIniCh1Path, "open streamer INI file for ch 1");
+    }
+
+    private bool CanOpenStreamerIniCh1File() =>
+        HasStreamerIniCh1File &&
+        !string.IsNullOrWhiteSpace(StreamerIniCh1Path);
+
+    [RelayCommand(CanExecute = nameof(CanOpenStreamerIniCh2File))]
+    private void OpenStreamerIniCh2File()
+    {
+        if (!CanOpenStreamerIniCh2File())
+        {
+            UpdateTelnetIniSummary();
+            AddStreamerStatus("Streamer INI file for ch 2 not found yet.");
+            return;
+        }
+
+        TryOpenPath(StreamerIniCh2Path, "open streamer INI file for ch 2");
+    }
+
+    private bool CanOpenStreamerIniCh2File() =>
+        HasStreamerIniCh2File &&
+        !string.IsNullOrWhiteSpace(StreamerIniCh2Path);
+
+    [RelayCommand(CanExecute = nameof(CanOpenStreamerIniFolder))]
+    private void OpenStreamerIniFolder()
+    {
+        if (!CanOpenStreamerIniFolder())
+        {
+            UpdateTelnetIniSummary();
+            AddStreamerStatus("Streamer INI folder not found yet.");
+            return;
+        }
+
+        TryOpenPath(StreamerIniFolderPath, "open streamer INI folder");
+    }
+
+    private bool CanOpenStreamerIniFolder() =>
+        HasStreamerIniFolder &&
+        !string.IsNullOrWhiteSpace(StreamerIniFolderPath);
 
     private async Task PublishSkimmerSpotAsync(CwSkimmerSpotInfo spot)
     {
@@ -942,47 +1197,59 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void UpdateTelnetIniSummary()
     {
-        if (TryReadLatestTelnetIniSection(out var sourceFileName, out var telnetLines))
+        var iniDir = ResolveCwSkimmerIniDirPath();
+        StreamerIniFolderPath = iniDir;
+        HasStreamerIniFolder = Directory.Exists(iniDir);
+
+        if (TryResolveStreamerIniFiles(out var iniFiles) && iniFiles.Count > 0)
         {
-            TelnetIniSummaryText = string.Join(Environment.NewLine,
-            [
-                $"INI file: {sourceFileName}",
-                "",
-                "[Telnet]",
-                .. telnetLines
-            ]);
+            var byChannel = iniFiles
+                .Select(f => new { File = f, Channel = ExtractChannelFromIniFileName(f.Name) })
+                .Where(x => x.Channel.HasValue)
+                .GroupBy(x => x.Channel!.Value)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(x => x.File.LastWriteTimeUtc).First().File);
+
+            if (byChannel.TryGetValue(1, out var ch1))
+            {
+                StreamerIniCh1Path = ch1.FullName;
+                StreamerIniCh1PathText = ch1.FullName;
+                HasStreamerIniCh1File = true;
+            }
+            else
+            {
+                StreamerIniCh1Path = string.Empty;
+                StreamerIniCh1PathText = "(not generated yet)";
+                HasStreamerIniCh1File = false;
+            }
+
+            if (byChannel.TryGetValue(2, out var ch2))
+            {
+                StreamerIniCh2Path = ch2.FullName;
+                StreamerIniCh2PathText = ch2.FullName;
+                HasStreamerIniCh2File = true;
+            }
+            else
+            {
+                StreamerIniCh2Path = string.Empty;
+                StreamerIniCh2PathText = "(not generated yet)";
+                HasStreamerIniCh2File = false;
+            }
             return;
         }
 
-        var callsign = string.IsNullOrWhiteSpace(TelnetCallsign) ? "(auto)" : TelnetCallsign.Trim();
-        var portBase = Math.Max(1, TelnetPortBase);
-        TelnetIniSummaryText = string.Join(Environment.NewLine,
-        [
-            "INI file: (none generated yet)",
-            "",
-            "[Telnet]",
-            $"Port={portBase} + (DAXIQ channel x 10)",
-            "PasswordRequired=0",
-            "Password=",
-            "CqOnly=0",
-            "AllowAnn=1",
-            "AnnUserOnly=0",
-            "AnnUser=",
-            "TelnetSrvEnabled=1",
-            "UdpSourceName=CW Skimmer",
-            "UdpAddress=127.0.0.1",
-            "UdpPort=13064",
-            "UdpEnabled=0",
-            "",
-            $"LoginCallsign={callsign}",
-            $"ClusterCommands={(TelnetClusterEnabled ? 1 : 0)}",
-        ]);
+        StreamerIniCh1Path = string.Empty;
+        HasStreamerIniCh1File = false;
+        StreamerIniCh1PathText = "(not generated yet)";
+        StreamerIniCh2Path = string.Empty;
+        HasStreamerIniCh2File = false;
+        StreamerIniCh2PathText = "(not generated yet)";
     }
 
-    private static bool TryReadLatestTelnetIniSection(out string sourceFileName, out IReadOnlyList<string> telnetLines)
+    private static bool TryResolveStreamerIniFiles(out IReadOnlyList<FileInfo> iniFiles)
     {
-        sourceFileName = string.Empty;
-        telnetLines = [];
+        iniFiles = [];
 
         try
         {
@@ -990,37 +1257,44 @@ public partial class MainWindowViewModel : ObservableObject
             if (!Directory.Exists(iniDir))
                 return false;
 
-            var iniFile = new DirectoryInfo(iniDir)
+            var files = new DirectoryInfo(iniDir)
                 .GetFiles("CwSkimmer-ch*.ini", SearchOption.TopDirectoryOnly)
-                .OrderByDescending(f => f.LastWriteTimeUtc)
-                .FirstOrDefault();
-            if (iniFile is null)
+                .ToArray();
+
+            if (files.Length == 0)
                 return false;
 
-            sourceFileName = iniFile.Name;
-            var lines = File.ReadAllLines(iniFile.FullName);
-            var start = Array.FindIndex(lines, l =>
-                string.Equals(l.Trim(), "[Telnet]", StringComparison.OrdinalIgnoreCase));
-            if (start < 0)
-                return false;
-
-            var captured = new List<string>();
-            for (var i = start + 1; i < lines.Length; i++)
-            {
-                var line = lines[i].Trim();
-                if (line.StartsWith("[") && line.EndsWith("]"))
-                    break;
-                if (line.Length == 0)
-                    continue;
-                captured.Add(line);
-            }
-
-            telnetLines = captured.Count == 0 ? [] : captured;
-            return captured.Count > 0;
+            iniFiles = files;
+            return true;
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static int? ExtractChannelFromIniFileName(string fileName)
+    {
+        var match = Regex.Match(fileName, @"CwSkimmer-ch(?<ch>\d+)\.ini", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+
+        return int.TryParse(match.Groups["ch"].Value, out var ch) ? ch : null;
+    }
+
+    private void TryOpenPath(string path, string targetDescription)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AddStreamerStatus($"Unable to {targetDescription}: {ex.Message}");
         }
     }
 
@@ -1158,29 +1432,41 @@ public partial class MainWindowViewModel : ObservableObject
         return output.Trim();
     }
 
-    private void QueueSliceSync(double freqMHz)
+    private int ResolveSliceDaxIqChannel(SliceInfo slice)
     {
-        if (!TelnetClusterEnabled)
+        return _connection.Panadapters
+            .FirstOrDefault(p => p.StreamId == slice.PanadapterStreamId)
+            ?.DAXIQChannel ?? 0;
+    }
+
+    private void QueueSliceSync(int daxIqChannel, double freqMHz)
+    {
+        if (!TelnetClusterEnabled || daxIqChannel <= 0)
             return;
 
-        var cts = ReplaceSyncCts(ref _sliceSyncCts);
+        var cts = ReplaceSyncCts(daxIqChannel);
         _ = Task.Run(async () =>
         {
             try
             {
                 await Task.Delay(120, cts.Token);
-                RecordOutboundQsy(freqMHz);
-                await _launcher.UpdateSliceFreqAsync(freqMHz);
+                RecordOutboundQsy(daxIqChannel, freqMHz);
+                await _launcher.UpdateSliceFreqAsync(daxIqChannel, freqMHz);
             }
             catch (OperationCanceledException) { }
         });
     }
 
-    private static CancellationTokenSource ReplaceSyncCts(ref CancellationTokenSource? field)
+    private CancellationTokenSource ReplaceSyncCts(int daxIqChannel)
     {
         var next = new CancellationTokenSource();
-        var previous = field;
-        field = next;
+        CancellationTokenSource? previous;
+
+        lock (_syncDampenGate)
+        {
+            _sliceSyncCtsByChannel.TryGetValue(daxIqChannel, out previous);
+            _sliceSyncCtsByChannel[daxIqChannel] = next;
+        }
 
         if (previous is not null)
         {
@@ -1191,16 +1477,15 @@ public partial class MainWindowViewModel : ObservableObject
         return next;
     }
 
-    private void RecordOutboundQsy(double freqMHz)
+    private void RecordOutboundQsy(int daxIqChannel, double freqMHz)
     {
         lock (_syncDampenGate)
         {
-            _lastOutboundQsyMHz = freqMHz;
-            _lastOutboundQsyUtc = DateTime.UtcNow;
+            _lastOutboundQsyByChannel[daxIqChannel] = (freqMHz, DateTime.UtcNow);
         }
     }
 
-    private bool ShouldSuppressInboundClick(double freqMHz, int clickSnapStepHz)
+    private bool ShouldSuppressInboundClick(int daxIqChannel, double freqMHz, int clickSnapStepHz)
     {
         var now = DateTime.UtcNow;
         var snapAwareEchoToleranceMHz = Math.Max(
@@ -1210,23 +1495,51 @@ public partial class MainWindowViewModel : ObservableObject
         lock (_syncDampenGate)
         {
             // Suppress immediate echo-back from our own outbound QSY commands.
-            if ((now - _lastOutboundQsyUtc) <= EchoSuppressWindow &&
-                Math.Abs(freqMHz - _lastOutboundQsyMHz) <= snapAwareEchoToleranceMHz)
+            if (_lastOutboundQsyByChannel.TryGetValue(daxIqChannel, out var outbound) &&
+                (now - outbound.Utc) <= EchoSuppressWindow &&
+                Math.Abs(freqMHz - outbound.FreqMHz) <= snapAwareEchoToleranceMHz)
             {
                 return true;
             }
 
             // Suppress fast duplicate click notifications at effectively same frequency.
-            if ((now - _lastInboundClickUtc) <= DuplicateClickWindow &&
-                Math.Abs(freqMHz - _lastInboundClickMHz) <= DuplicateClickToleranceMHz)
+            if (_lastInboundClickByChannel.TryGetValue(daxIqChannel, out var inbound) &&
+                (now - inbound.Utc) <= DuplicateClickWindow &&
+                Math.Abs(freqMHz - inbound.FreqMHz) <= DuplicateClickToleranceMHz)
             {
                 return true;
             }
 
-            _lastInboundClickMHz = freqMHz;
-            _lastInboundClickUtc = now;
+            _lastInboundClickByChannel[daxIqChannel] = (freqMHz, now);
             return false;
         }
+    }
+
+    private SliceInfo? GetPreferredSliceForTune(int daxIqChannel)
+    {
+        if (daxIqChannel > 0)
+        {
+            var panForChannel = _connection.Panadapters
+                .FirstOrDefault(p => p.DAXIQChannel == daxIqChannel &&
+                                     string.Equals(p.ClientStation, SelectedControlStation, StringComparison.OrdinalIgnoreCase))
+                ?? _connection.Panadapters.FirstOrDefault(p => p.DAXIQChannel == daxIqChannel);
+
+            if (panForChannel is not null)
+            {
+                var ownSlice = _connection.Slices.FirstOrDefault(s =>
+                    s.PanadapterStreamId == panForChannel.StreamId &&
+                    IsOwnStationSlice(s));
+                if (ownSlice is not null)
+                    return ownSlice;
+
+                var anySlice = _connection.Slices.FirstOrDefault(s =>
+                    s.PanadapterStreamId == panForChannel.StreamId);
+                if (anySlice is not null)
+                    return anySlice;
+            }
+        }
+
+        return GetPreferredSliceForTune();
     }
 
     private SliceInfo? GetPreferredSliceForTune()
@@ -1349,7 +1662,34 @@ public partial class MainWindowViewModel : ObservableObject
     private static string BuildSliceRitKey(SliceInfo slice)
         => $"{slice.ClientStation}|{slice.Letter}";
 
-    private bool ShouldResyncLoForPanCenterMove(int channel, long centerHz, long halfBandwidthHz)
+    private static int GetBandBucketMHz(long freqHz) => (int)(freqHz / 1_000_000L);
+
+    private long? ResolveEffectiveRxFrequencyHzForChannel(int daxIqChannel)
+    {
+        if (daxIqChannel <= 0)
+            return null;
+
+        var panForChannel = _connection.Panadapters
+            .FirstOrDefault(p => p.DAXIQChannel == daxIqChannel &&
+                                 string.Equals(p.ClientStation, SelectedControlStation, StringComparison.OrdinalIgnoreCase))
+            ?? _connection.Panadapters.FirstOrDefault(p => p.DAXIQChannel == daxIqChannel);
+
+        if (panForChannel is null)
+            return null;
+
+        var slice = _connection.Slices.FirstOrDefault(s =>
+            s.PanadapterStreamId == panForChannel.StreamId &&
+            IsOwnStationSlice(s))
+            ?? _connection.Slices.FirstOrDefault(s => s.PanadapterStreamId == panForChannel.StreamId);
+
+        if (slice is null)
+            return null;
+
+        var effectiveRxMHz = GetEffectiveRxFrequencyMHz(slice);
+        return (long)Math.Round(effectiveRxMHz * 1_000_000d);
+    }
+
+    private bool ShouldResyncLoForPanCenterMove(int channel, long centerHz, long halfBandwidthHz, long? effectiveRxFreqHz)
     {
         if (!_lastLoCenterHzByChannel.TryGetValue(channel, out var previousHz))
         {
@@ -1357,7 +1697,16 @@ public partial class MainWindowViewModel : ObservableObject
             return false;
         }
 
-        if (Math.Abs(centerHz - previousHz) <= Math.Max(1, halfBandwidthHz))
+        var centerDeltaHz = Math.Abs(centerHz - previousHz);
+        var strongCenterMove = centerDeltaHz > Math.Max(1, halfBandwidthHz);
+        var bandBucketChanged = GetBandBucketMHz(centerHz) != GetBandBucketMHz(previousHz);
+
+        var edgeThresholdHz = Math.Max(1L, (long)Math.Round(halfBandwidthHz * 0.45d));
+        var nearEdge = effectiveRxFreqHz.HasValue &&
+                       Math.Abs(effectiveRxFreqHz.Value - centerHz) >= edgeThresholdHz;
+        var edgeDrivenMove = nearEdge && centerDeltaHz >= Math.Max(50L, halfBandwidthHz / 8L);
+
+        if (!strongCenterMove && !bandBucketChanged && !edgeDrivenMove)
             return false;
 
         _lastLoCenterHzByChannel[channel] = centerHz;

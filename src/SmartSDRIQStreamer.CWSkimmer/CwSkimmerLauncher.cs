@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 
@@ -12,17 +13,22 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 {
     private static readonly string IniDir =
         RuntimePathResolver.ResolveCwSkimmerIniDir();
+    private static readonly TimeSpan GracefulStopWait = TimeSpan.FromSeconds(2);
 
     private readonly CwSkimmerIniModelFactory _modelFactory;
     private readonly CwSkimmerIniWriter       _iniWriter;
     private readonly IAudioDeviceFinder       _deviceFinder;
-    private readonly ICwSkimmerTelnetClient   _telnet;
+    private readonly Func<ICwSkimmerTelnetClient> _telnetFactory;
 
     private readonly Dictionary<int, Process> _processesByChannel = new();
+    private readonly Dictionary<int, ICwSkimmerTelnetClient> _telnetByChannel = new();
+    private readonly Dictionary<int, CancellationTokenSource> _telnetLifecycleCtsByChannel = new();
+    private readonly Dictionary<int, int> _telnetPortByChannel = new();
+    private readonly Dictionary<int, string> _managedIniPathByChannel = new();
+    private readonly Dictionary<int, CwSkimmerIniModel> _lastIniModelByChannel = new();
     private readonly List<Task> _backgroundTasks = new();
     private readonly object _sync = new();
-    private CancellationTokenSource _telnetLifecycleCts = new();
-    private int _telnetDisconnectInFlight;
+    private readonly HashSet<int> _telnetDisconnectInFlightChannels = [];
     private bool? _lastEmittedRunningState;
 
     public bool IsRunning
@@ -33,7 +39,14 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                 return _processesByChannel.Values.Any(p => !p.HasExited);
         }
     }
-    public bool TelnetConnected => _telnet.IsConnected;
+    public bool TelnetConnected
+    {
+        get
+        {
+            lock (_sync)
+                return _telnetByChannel.Values.Any(t => t.IsConnected);
+        }
+    }
     public bool IsChannelRunning(int daxIqChannel)
     {
         lock (_sync)
@@ -41,8 +54,8 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     }
 
     public event Action<bool>?   RunningStateChanged;
-    public event Action<double>? FrequencyClicked;
-    public event Action<CwSkimmerSpotInfo>? SpotReceived;
+    public event Action<int, double>? FrequencyClicked;
+    public event Action<int, CwSkimmerSpotInfo>? SpotReceived;
     public event Action<string>? TelnetStatusChanged;
 
     public string LastDiagnostics { get; private set; } = string.Empty;
@@ -50,16 +63,12 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     public CwSkimmerLauncher(CwSkimmerIniModelFactory modelFactory,
                              CwSkimmerIniWriter       iniWriter,
                              IAudioDeviceFinder       deviceFinder,
-                             ICwSkimmerTelnetClient   telnet)
+                             Func<ICwSkimmerTelnetClient> telnetFactory)
     {
         _modelFactory = modelFactory;
         _iniWriter    = iniWriter;
         _deviceFinder = deviceFinder;
-        _telnet       = telnet;
-
-        _telnet.FrequencyClicked += freq => FrequencyClicked?.Invoke(freq);
-        _telnet.SpotReceived += spot => SpotReceived?.Invoke(spot);
-        _telnet.StatusChanged += message => TelnetStatusChanged?.Invoke(message);
+        _telnetFactory = telnetFactory;
     }
 
     public (string SignalDevice, int SignalIdx, string AudioDevice, int AudioIdx)?
@@ -106,6 +115,14 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             return LaunchResult.TemplateIniNotFound;
 
         _iniWriter.Write(model, iniPath);
+        lock (_sync)
+        {
+            _managedIniPathByChannel[daxIqChannel] = iniPath;
+            _lastIniModelByChannel[daxIqChannel] = model;
+        }
+        var resolvedTelnetPort = TryReadTelnetPortFromIni(iniPath) ?? config.TelnetPort;
+        lock (_sync)
+            _telnetPortByChannel[daxIqChannel] = resolvedTelnetPort;
 
         if (config.LaunchDelaySeconds > 0)
             await Task.Delay(TimeSpan.FromSeconds(config.LaunchDelaySeconds));
@@ -136,13 +153,20 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         // then immediately sync the VFO frequency.
         var sliceFreqMHz = config.InitialSliceFreqMHz;
         var loFreqHz = config.InitialLoFreqHz;
-        if (!_telnet.IsConnected)
-            RunBackgroundTask(ConnectTelnetAsync(config, sliceFreqMHz, loFreqHz, _telnetLifecycleCts.Token), "telnet connect");
+        if (!IsTelnetConnected(daxIqChannel))
+        {
+            var telnetCts = GetOrCreateTelnetLifecycleCts(daxIqChannel);
+            RunBackgroundTask(
+                ConnectTelnetAsync(daxIqChannel, resolvedTelnetPort, config, sliceFreqMHz, loFreqHz, telnetCts.Token),
+                $"telnet connect ch {daxIqChannel}");
+        }
 
         return LaunchResult.Success;
     }
 
     private async Task ConnectTelnetAsync(
+        int daxIqChannel,
+        int telnetPort,
         CwSkimmerConfig config,
         double initialSliceFreqMHz,
         long initialLoFreqHz,
@@ -151,7 +175,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         if (config.ConnectDelaySeconds > 0)
             await Task.Delay(TimeSpan.FromSeconds(config.ConnectDelaySeconds), ct);
 
-        if (!IsRunning) return;
+        if (!IsChannelRunning(daxIqChannel)) return;
 
         const int maxConnectAttempts = 3;
         var retryDelays = new[]
@@ -169,9 +193,10 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                 if (settleDelay > TimeSpan.Zero)
                     await Task.Delay(settleDelay, ct);
 
-                await _telnet.ConnectAsync(
+                var telnet = GetOrCreateTelnetClient(daxIqChannel);
+                await telnet.ConnectAsync(
                     "127.0.0.1",
-                    config.TelnetPort,
+                    telnetPort,
                     config.Callsign,
                     config.TelnetPassword,
                     ct);
@@ -181,10 +206,10 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                     // Sync initial LO and VFO immediately after connect so CW Skimmer
                     // starts on the correct band/frequency context.
                     if (initialLoFreqHz > 0)
-                        await _telnet.SendLoFreqAsync(initialLoFreqHz, ct);
+                        await telnet.SendLoFreqAsync(initialLoFreqHz, ct);
 
                     if (initialSliceFreqMHz > 0)
-                        await _telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
+                        await telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
                 }
 
                 return;
@@ -206,38 +231,58 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         }
     }
 
-    public async Task UpdateLoFreqAsync(long freqHz)
+    public async Task UpdateLoFreqAsync(int daxIqChannel, long freqHz)
     {
-        try { await _telnet.SendLoFreqAsync(freqHz); }
+        if (!TryGetTelnetClient(daxIqChannel, out var telnet))
+            return;
+
+        try { await telnet.SendLoFreqAsync(freqHz); }
         catch (Exception ex) { LogNonFatal("LO frequency sync failed.", ex); }
     }
 
-    public async Task UpdateSliceFreqAsync(double freqMHz)
+    public async Task UpdateSliceFreqAsync(int daxIqChannel, double freqMHz)
     {
-        try { await _telnet.SendQsyAsync(freqMHz * 1000.0); }
+        if (!TryGetTelnetClient(daxIqChannel, out var telnet))
+            return;
+
+        try { await telnet.SendQsyAsync(freqMHz * 1000.0); }
         catch (Exception ex) { LogNonFatal("Slice frequency sync failed.", ex); }
     }
 
     public void Stop()
     {
+        List<int> channels;
         List<Process> procs;
         lock (_sync)
         {
+            channels = _processesByChannel.Keys.ToList();
             procs = _processesByChannel.Values.ToList();
             _processesByChannel.Clear();
         }
 
         foreach (var proc in procs)
         {
-            if (proc is { HasExited: false })
-            {
-                try { proc.Kill(); }
-                catch (Exception ex) { LogNonFatal("Failed to kill CW Skimmer process.", ex); }
-            }
+            TryStopProcessGracefully(proc);
         }
 
-        CancelPendingTelnetWork();
-        BeginTelnetDisconnect();
+        foreach (var channel in channels)
+            PersistManagedIniForChannel(channel);
+
+        foreach (var channel in channels)
+        {
+            CancelPendingTelnetWork(channel);
+            BeginTelnetDisconnect(channel);
+        }
+
+        List<int> telnetOnlyChannels;
+        lock (_sync)
+            telnetOnlyChannels = _telnetByChannel.Keys.Except(channels).ToList();
+
+        foreach (var channel in telnetOnlyChannels)
+        {
+            CancelPendingTelnetWork(channel);
+            BeginTelnetDisconnect(channel);
+        }
         EmitRunningStateChangedIfNeeded(IsRunning);
     }
 
@@ -253,17 +298,12 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             }
         }
 
-        if (proc is { HasExited: false })
-        {
-            try { proc.Kill(); }
-            catch (Exception ex) { LogNonFatal("Failed to kill CW Skimmer process.", ex); }
-        }
+        if (proc is not null)
+            TryStopProcessGracefully(proc);
 
-        if (!IsRunning)
-        {
-            CancelPendingTelnetWork();
-            BeginTelnetDisconnect();
-        }
+        PersistManagedIniForChannel(daxIqChannel);
+        CancelPendingTelnetWork(daxIqChannel);
+        BeginTelnetDisconnect(daxIqChannel);
 
         EmitRunningStateChangedIfNeeded(IsRunning);
     }
@@ -273,11 +313,8 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         lock (_sync)
             _processesByChannel.Remove(daxIqChannel);
 
-        if (!IsRunning)
-        {
-            CancelPendingTelnetWork();
-            BeginTelnetDisconnect();
-        }
+        CancelPendingTelnetWork(daxIqChannel);
+        BeginTelnetDisconnect(daxIqChannel);
         EmitRunningStateChangedIfNeeded(IsRunning);
     }
 
@@ -319,6 +356,14 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
     private bool PrepareManagedIniFromTemplate(string targetIniPath, CwSkimmerConfig config, out string templateIniPath)
     {
+        // Preserve per-channel window geometry and other CW-managed sections by
+        // reusing an existing managed INI when present.
+        if (File.Exists(targetIniPath))
+        {
+            templateIniPath = targetIniPath;
+            return true;
+        }
+
         templateIniPath = ResolveTemplateIniPath(config);
         if (string.IsNullOrWhiteSpace(templateIniPath))
             return false;
@@ -347,33 +392,173 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         return string.Empty;
     }
 
-    private void BeginTelnetDisconnect()
+    private static int? TryReadTelnetPortFromIni(string iniPath)
     {
-        if (Interlocked.CompareExchange(ref _telnetDisconnectInFlight, 1, 0) != 0)
-            return;
+        if (!File.Exists(iniPath))
+            return null;
 
-        RunBackgroundTask(DisconnectTelnetAsync(), "telnet disconnect");
+        var inTelnetSection = false;
+        foreach (var raw in File.ReadLines(iniPath))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0)
+                continue;
+
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                inTelnetSection = string.Equals(line, "[Telnet]", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (!inTelnetSection)
+                continue;
+
+            if (!line.StartsWith("Port=", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = line["Port=".Length..].Trim();
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) && port > 0)
+                return port;
+        }
+
+        return null;
     }
 
-    private void CancelPendingTelnetWork()
+    private bool IsTelnetConnected(int daxIqChannel)
     {
-        CancellationTokenSource toDispose;
+        lock (_sync)
+            return _telnetByChannel.TryGetValue(daxIqChannel, out var telnet) && telnet.IsConnected;
+    }
+
+    private bool TryGetTelnetClient(int daxIqChannel, out ICwSkimmerTelnetClient telnet)
+    {
+        lock (_sync)
+            return _telnetByChannel.TryGetValue(daxIqChannel, out telnet!);
+    }
+
+    private ICwSkimmerTelnetClient GetOrCreateTelnetClient(int daxIqChannel)
+    {
         lock (_sync)
         {
-            toDispose = _telnetLifecycleCts;
-            _telnetLifecycleCts = new CancellationTokenSource();
+            if (_telnetByChannel.TryGetValue(daxIqChannel, out var existing))
+                return existing;
+
+            var telnet = _telnetFactory();
+            telnet.FrequencyClicked += freq => FrequencyClicked?.Invoke(daxIqChannel, freq);
+            telnet.SpotReceived += spot => SpotReceived?.Invoke(daxIqChannel, spot);
+            telnet.StatusChanged += message =>
+            {
+                var portText = TryGetKnownTelnetPortText(daxIqChannel);
+                TelnetStatusChanged?.Invoke($"ch {daxIqChannel}{portText}: {message}");
+            };
+            _telnetByChannel[daxIqChannel] = telnet;
+            return telnet;
         }
+    }
+
+    private string TryGetKnownTelnetPortText(int daxIqChannel)
+    {
+        lock (_sync)
+        {
+            if (_telnetPortByChannel.TryGetValue(daxIqChannel, out var port) && port > 0)
+                return $" ({port})";
+        }
+
+        return string.Empty;
+    }
+
+    private CancellationTokenSource GetOrCreateTelnetLifecycleCts(int daxIqChannel)
+    {
+        lock (_sync)
+        {
+            if (_telnetLifecycleCtsByChannel.TryGetValue(daxIqChannel, out var existing))
+                return existing;
+
+            var created = new CancellationTokenSource();
+            _telnetLifecycleCtsByChannel[daxIqChannel] = created;
+            return created;
+        }
+    }
+
+    private void BeginTelnetDisconnect(int daxIqChannel)
+    {
+        lock (_sync)
+        {
+            if (_telnetDisconnectInFlightChannels.Contains(daxIqChannel))
+                return;
+
+            _telnetDisconnectInFlightChannels.Add(daxIqChannel);
+        }
+
+        RunBackgroundTask(DisconnectTelnetAsync(daxIqChannel), $"telnet disconnect ch {daxIqChannel}");
+    }
+
+    private void CancelPendingTelnetWork(int daxIqChannel)
+    {
+        CancellationTokenSource? toDispose = null;
+        lock (_sync)
+        {
+            if (_telnetLifecycleCtsByChannel.TryGetValue(daxIqChannel, out var current))
+            {
+                toDispose = current;
+                _telnetLifecycleCtsByChannel[daxIqChannel] = new CancellationTokenSource();
+            }
+        }
+
+        if (toDispose is null)
+            return;
 
         try { toDispose.Cancel(); }
         catch (ObjectDisposedException) { }
         finally { toDispose.Dispose(); }
     }
 
-    private async Task DisconnectTelnetAsync()
+    private async Task DisconnectTelnetAsync(int daxIqChannel)
     {
-        try { await _telnet.DisconnectAsync(); }
-        catch (Exception ex) { LogNonFatal("Background telnet disconnect failed.", ex); }
-        finally { Interlocked.Exchange(ref _telnetDisconnectInFlight, 0); }
+        ICwSkimmerTelnetClient? telnet = null;
+        CancellationTokenSource? lifecycleCts = null;
+        lock (_sync)
+        {
+            if (_telnetByChannel.TryGetValue(daxIqChannel, out var existing))
+            {
+                telnet = existing;
+                _telnetByChannel.Remove(daxIqChannel);
+            }
+
+            if (_telnetLifecycleCtsByChannel.TryGetValue(daxIqChannel, out var cts))
+            {
+                lifecycleCts = cts;
+                _telnetLifecycleCtsByChannel.Remove(daxIqChannel);
+            }
+
+            _telnetPortByChannel.Remove(daxIqChannel);
+            _managedIniPathByChannel.Remove(daxIqChannel);
+            _lastIniModelByChannel.Remove(daxIqChannel);
+        }
+
+        try
+        {
+            if (telnet is not null)
+            {
+                try { await telnet.DisconnectAsync(); }
+                finally { await telnet.DisposeAsync(); }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogNonFatal($"Background telnet disconnect failed (ch {daxIqChannel}).", ex);
+        }
+        finally
+        {
+            if (lifecycleCts is not null)
+            {
+                try { lifecycleCts.Cancel(); } catch { }
+                lifecycleCts.Dispose();
+            }
+
+            lock (_sync)
+                _telnetDisconnectInFlightChannels.Remove(daxIqChannel);
+        }
     }
 
     private void RunBackgroundTask(Task task, string operation)
@@ -401,16 +586,62 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
     private static bool IsRetriableStartupConnectFailure(Exception ex)
     {
-        if (ex is IOException ioEx &&
-            ioEx.Message.Contains("rejected telnet authentication", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
         if (ex is SocketException socketEx && socketEx.SocketErrorCode == SocketError.ConnectionRefused)
             return true;
 
         return false;
+    }
+
+    private void PersistManagedIniForChannel(int daxIqChannel)
+    {
+        string? path = null;
+        CwSkimmerIniModel? model = null;
+        lock (_sync)
+        {
+            _managedIniPathByChannel.TryGetValue(daxIqChannel, out path);
+            _lastIniModelByChannel.TryGetValue(daxIqChannel, out model);
+        }
+
+        if (string.IsNullOrWhiteSpace(path) || model is null)
+            return;
+
+        try
+        {
+            _iniWriter.Write(model, path);
+        }
+        catch (Exception ex)
+        {
+            LogNonFatal($"Failed to persist managed INI for channel {daxIqChannel}.", ex);
+        }
+    }
+
+    private static void TryStopProcessGracefully(Process proc)
+    {
+        if (proc.HasExited)
+            return;
+
+        try
+        {
+            var closeRequested = proc.CloseMainWindow();
+            if (closeRequested && proc.WaitForExit(GracefulStopWait))
+                return;
+        }
+        catch (Exception ex)
+        {
+            LogNonFatal("Graceful CW Skimmer stop failed, falling back to kill.", ex);
+        }
+
+        if (proc.HasExited)
+            return;
+
+        try
+        {
+            proc.Kill();
+        }
+        catch (Exception ex)
+        {
+            LogNonFatal("Failed to kill CW Skimmer process.", ex);
+        }
     }
 
     private void EmitRunningStateChangedIfNeeded(bool running)
@@ -428,9 +659,12 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
     public void Dispose()
     {
-        CancelPendingTelnetWork();
         Stop();
         lock (_sync)
-            _telnetLifecycleCts.Dispose();
+        {
+            foreach (var cts in _telnetLifecycleCtsByChannel.Values)
+                cts.Dispose();
+            _telnetLifecycleCtsByChannel.Clear();
+        }
     }
 }

@@ -19,7 +19,7 @@ public interface ICwSkimmerLauncher
     bool IsRunning { get; }
     bool IsChannelRunning(int daxIqChannel);
 
-    /// <summary>Whether the telnet client is currently connected to CW Skimmer.</summary>
+    /// <summary>Whether any channel telnet client is currently connected to CW Skimmer.</summary>
     bool TelnetConnected { get; }
 
     /// <summary>
@@ -42,14 +42,15 @@ public interface ICwSkimmerLauncher
 
     /// <summary>
     /// Fires when the user clicks on a signal in CW Skimmer.
-    /// Argument is the clicked frequency in kHz.
+    /// Arguments are DAX-IQ channel and clicked frequency in kHz.
     /// </summary>
-    event Action<double>? FrequencyClicked;
+    event Action<int, double>? FrequencyClicked;
 
     /// <summary>
     /// Fires when CW Skimmer emits a DX spot line.
+    /// Arguments are DAX-IQ channel and spot payload.
     /// </summary>
-    event Action<CwSkimmerSpotInfo>? SpotReceived;
+    event Action<int, CwSkimmerSpotInfo>? SpotReceived;
 
     /// <summary>
     /// Emits key telnet lifecycle/status messages suitable for UI status display.
@@ -69,16 +70,16 @@ public interface ICwSkimmerLauncher
         CwSkimmerConfig config);
 
     /// <summary>
-    /// Send <c>SKIMMER/LO_FREQ</c> to update CW Skimmer's centre frequency
-    /// when the panadapter moves.  No-op if telnet is not connected.
+    /// Send <c>SKIMMER/LO_FREQ</c> to update one CW Skimmer instance's centre frequency
+    /// when the panadapter moves.  No-op if the channel telnet is not connected.
     /// </summary>
-    Task UpdateLoFreqAsync(long freqHz);
+    Task UpdateLoFreqAsync(int daxIqChannel, long freqHz);
 
     /// <summary>
-    /// Send <c>SKIMMER/QSY</c> to update CW Skimmer's operating/VFO frequency
-    /// shown in the main window.  No-op if telnet is not connected.
+    /// Send <c>SKIMMER/QSY</c> to update one CW Skimmer instance's operating/VFO frequency
+    /// shown in the main window.  No-op if the channel telnet is not connected.
     /// </summary>
-    Task UpdateSliceFreqAsync(double freqMHz);
+    Task UpdateSliceFreqAsync(int daxIqChannel, double freqMHz);
 
     /// <summary>Kills all CW Skimmer processes and disconnects telnet if running.</summary>
     void Stop();
