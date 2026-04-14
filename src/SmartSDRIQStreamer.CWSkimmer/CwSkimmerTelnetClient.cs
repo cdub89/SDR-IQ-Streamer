@@ -41,6 +41,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
     private readonly SemaphoreSlim  _writeLock = new(1, 1);
     private DateTime                _lastLoSyncStatusUtc;
     private DateTime                _lastQsySyncStatusUtc;
+    private DateTime                _lastQsyStatusEmitUtc;
+    private double?                 _lastQsyStatusFreqMHz;
     private volatile bool           _isSessionReady;
     private int                     _disconnectInProgress;
 
@@ -61,6 +63,9 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         EmitStatus($"Telnet connecting to {host}:{port}...");
         try
         {
+            _lastQsyStatusFreqMHz = null;
+            _lastQsySyncStatusUtc = default;
+            _lastQsyStatusEmitUtc = default;
             _tcp    = new TcpClient();
             await _tcp.ConnectAsync(host, port, ct);
             _stream = _tcp.GetStream();
@@ -82,6 +87,7 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         catch (Exception ex)
         {
             _isSessionReady = false;
+            MarkDisconnected();
             LogDiag($"CONNECT error {ex.GetType().Name}: {ex.Message}");
             EmitStatus($"Telnet connect failed: {ex.Message}");
             throw;
@@ -136,10 +142,7 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             await _writer.WriteLineAsync(command);
             LogDiag($"TX {command}");
             var freqMHz = freqKhz / 1000.0;
-            EmitThrottledSyncStatus(
-                ref _lastQsySyncStatusUtc,
-                TimeSpan.FromSeconds(2),
-                $"QSY sync (VFO): {freqMHz.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)} MHz");
+            EmitQsySyncStatus(freqMHz);
         }
         catch (Exception ex)
         {
@@ -194,6 +197,9 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             _tcp      = null;
             _readCts  = null;
             _readTask = null;
+            _lastQsyStatusFreqMHz = null;
+            _lastQsySyncStatusUtc = default;
+            _lastQsyStatusEmitUtc = default;
             LogDiag("DISCONNECT complete");
             EmitStatus("Telnet disconnected.");
         }
@@ -501,6 +507,9 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         _writer = null;
         _stream = null;
         _tcp = null;
+        _lastQsyStatusFreqMHz = null;
+        _lastQsySyncStatusUtc = default;
+        _lastQsyStatusEmitUtc = default;
     }
 
     private void EmitThrottledSyncStatus(ref DateTime lastStatusUtc, TimeSpan minInterval, string message)
@@ -511,6 +520,26 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 
         lastStatusUtc = now;
         EmitStatus(message);
+    }
+
+    private void EmitQsySyncStatus(double freqMHz)
+    {
+        var now = DateTime.UtcNow;
+        // Suppress duplicate status spam when QSY messages repeat same frequency.
+        if (_lastQsyStatusFreqMHz.HasValue &&
+            Math.Abs(freqMHz - _lastQsyStatusFreqMHz.Value) <= 0.0000005 &&
+            now - _lastQsyStatusEmitUtc < TimeSpan.FromSeconds(12))
+        {
+            return;
+        }
+
+        if (now - _lastQsySyncStatusUtc < TimeSpan.FromSeconds(2))
+            return;
+
+        _lastQsyStatusFreqMHz = freqMHz;
+        _lastQsySyncStatusUtc = now;
+        _lastQsyStatusEmitUtc = now;
+        EmitStatus($"QSY sync (VFO): {freqMHz.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)} MHz");
     }
 
     private static bool ContainsAny(string text, params string[] markers)

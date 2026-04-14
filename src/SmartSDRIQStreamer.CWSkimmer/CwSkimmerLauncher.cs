@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Text;
 
 namespace SDRIQStreamer.CWSkimmer;
@@ -152,31 +153,56 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
         if (!IsRunning) return;
 
-        try
+        const int maxConnectAttempts = 3;
+        var retryDelays = new[]
         {
-            await _telnet.ConnectAsync(
-                "127.0.0.1",
-                config.TelnetPort,
-                config.Callsign,
-                config.TelnetPassword,
-                ct);
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(800),
+            TimeSpan.FromMilliseconds(1600)
+        };
 
-            if (config.TelnetClusterEnabled)
+        for (var attempt = 1; attempt <= maxConnectAttempts; attempt++)
+        {
+            try
             {
-                // Sync initial LO and VFO immediately after connect so CW Skimmer
-                // starts on the correct band/frequency context.
-                if (initialLoFreqHz > 0)
-                    await _telnet.SendLoFreqAsync(initialLoFreqHz, ct);
+                var settleDelay = retryDelays[Math.Min(attempt - 1, retryDelays.Length - 1)];
+                if (settleDelay > TimeSpan.Zero)
+                    await Task.Delay(settleDelay, ct);
 
-                if (initialSliceFreqMHz > 0)
-                    await _telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
+                await _telnet.ConnectAsync(
+                    "127.0.0.1",
+                    config.TelnetPort,
+                    config.Callsign,
+                    config.TelnetPassword,
+                    ct);
+
+                if (config.TelnetClusterEnabled)
+                {
+                    // Sync initial LO and VFO immediately after connect so CW Skimmer
+                    // starts on the correct band/frequency context.
+                    if (initialLoFreqHz > 0)
+                        await _telnet.SendLoFreqAsync(initialLoFreqHz, ct);
+
+                    if (initialSliceFreqMHz > 0)
+                        await _telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
+                }
+
+                return;
             }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            // Telnet is best-effort; LO/QSY sync won't work but CW Skimmer still runs.
-            LogNonFatal("Background telnet connect failed.", ex);
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex) when (attempt < maxConnectAttempts && IsRetriableStartupConnectFailure(ex))
+            {
+                LogNonFatal($"Telnet connect retry {attempt}/{maxConnectAttempts - 1} after startup race.", ex);
+            }
+            catch (Exception ex)
+            {
+                // Telnet is best-effort; LO/QSY sync won't work but CW Skimmer still runs.
+                LogNonFatal("Background telnet connect failed.", ex);
+                return;
+            }
         }
     }
 
@@ -371,6 +397,20 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             Debug.WriteLine($"[CwSkimmerLauncher] {message}");
         else
             Debug.WriteLine($"[CwSkimmerLauncher] {message} {ex.Message}");
+    }
+
+    private static bool IsRetriableStartupConnectFailure(Exception ex)
+    {
+        if (ex is IOException ioEx &&
+            ioEx.Message.Contains("rejected telnet authentication", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (ex is SocketException socketEx && socketEx.SocketErrorCode == SocketError.ConnectionRefused)
+            return true;
+
+        return false;
     }
 
     private void EmitRunningStateChangedIfNeeded(bool running)

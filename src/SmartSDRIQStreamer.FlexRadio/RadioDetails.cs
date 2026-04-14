@@ -24,10 +24,16 @@ public sealed record SliceInfo(
     string Letter,
     string Mode,
     double FreqMHz,
+    bool   RitEnabled,
+    double RitOffsetHz,
+    int    TuneStepHz,
     uint   PanadapterStreamId,
     string ClientStation)
 {
-    public string DisplayLabel => $"Slice {Letter}  {Mode}  {FreqMHz:F6} MHz";
+    public string DisplayLabel =>
+        RitEnabled && Math.Abs(RitOffsetHz) >= 0.5
+            ? $"Slice {Letter}  {Mode}  {FreqMHz:F6} MHz  RIT {RitOffsetHz:+0;-0} Hz"
+            : $"Slice {Letter}  {Mode}  {FreqMHz:F6} MHz";
 }
 
 public sealed record DaxIQStreamInfo(

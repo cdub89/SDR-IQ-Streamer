@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using Flex.Smoothlake.FlexLib;
 
 namespace SDRIQStreamer.FlexRadio;
@@ -202,7 +204,7 @@ public sealed class FlexLibRadioConnection : IRadioConnection
     private void OnSlicePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is not Slice slc) return;
-        if (e.PropertyName is not ("Freq" or "DemodMode")) return;
+        if (!ShouldPublishSliceUpdate(e.PropertyName)) return;
 
         var info = ToSliceInfo(slc);
         _slices[SliceKey(slc)] = info;
@@ -392,8 +394,132 @@ public sealed class FlexLibRadioConnection : IRadioConnection
         new(slc.Letter    ?? string.Empty,
             slc.DemodMode ?? string.Empty,
             slc.Freq,
+            ResolveRitEnabled(slc),
+            ResolveRitOffsetHz(slc),
+            ResolveTuneStepHz(slc),
             slc.PanadapterStreamID,
             ResolveStation(slc.ClientHandle));
+
+    private static bool ShouldPublishSliceUpdate(string? propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(propertyName))
+            return true;
+
+        if (propertyName is "Freq" or "DemodMode")
+            return true;
+
+        // FlexLib variants expose RIT state/offset and tune-step with different names.
+        return propertyName.Contains("RIT", StringComparison.OrdinalIgnoreCase)
+            || propertyName.Contains("Step", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ResolveRitEnabled(Slice slc)
+    {
+        return TryGetBoolProperty(slc, "RITOn")
+            ?? TryGetBoolProperty(slc, "RitOn")
+            ?? TryGetBoolProperty(slc, "RitEnabled")
+            ?? false;
+    }
+
+    private static double ResolveRitOffsetHz(Slice slc)
+    {
+        return TryGetDoubleProperty(slc, "RITFreq")
+            ?? TryGetDoubleProperty(slc, "RitFreq")
+            ?? TryGetDoubleProperty(slc, "RITOffset")
+            ?? TryGetDoubleProperty(slc, "RitOffset")
+            ?? 0d;
+    }
+
+    private static int ResolveTuneStepHz(Slice slc)
+    {
+        return TryGetTuneStepHz(slc, "TuneStep")
+            ?? TryGetTuneStepHz(slc, "Step")
+            ?? 0;
+    }
+
+    private static int? TryGetTuneStepHz(object target, string propertyName)
+    {
+        var property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+        if (property is null)
+            return null;
+
+        var value = property.GetValue(target);
+        if (value is null)
+            return null;
+
+        if (value is int i && i > 0)
+            return i;
+        if (value is long l && l > 0 && l <= int.MaxValue)
+            return (int)l;
+        if (value is float f && f > 0)
+            return (int)Math.Round(f);
+        if (value is double d && d > 0)
+            return (int)Math.Round(d);
+        if (value is decimal m && m > 0)
+            return (int)Math.Round(m);
+
+        var text = value.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var trimmed = text.Trim();
+        var numericPart = new string(trimmed.Where(ch => char.IsDigit(ch) || ch is '.' or ',').ToArray());
+        if (numericPart.Length == 0)
+            return null;
+
+        var normalized = numericPart.Replace(',', '.');
+        if (!double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+            return null;
+
+        if (trimmed.Contains("khz", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains(" k", StringComparison.OrdinalIgnoreCase))
+        {
+            parsed *= 1000d;
+        }
+
+        var hz = (int)Math.Round(parsed);
+        return hz > 0 ? hz : null;
+    }
+
+    private static bool? TryGetBoolProperty(object target, string propertyName)
+    {
+        var property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+        if (property is null)
+            return null;
+
+        var value = property.GetValue(target);
+        if (value is null)
+            return null;
+
+        if (value is bool boolValue)
+            return boolValue;
+
+        return bool.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
+
+    private static double? TryGetDoubleProperty(object target, string propertyName)
+    {
+        var property = target.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+        if (property is null)
+            return null;
+
+        var value = property.GetValue(target);
+        if (value is null)
+            return null;
+
+        if (value is double d)
+            return d;
+        if (value is float f)
+            return f;
+        if (value is decimal m)
+            return (double)m;
+        if (value is int i)
+            return i;
+        if (value is long l)
+            return l;
+
+        return double.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
 
     private DaxIQStreamInfo ToDaxIQStreamInfo(DAXIQStream iq)
     {

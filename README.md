@@ -1,40 +1,63 @@
-# SDR-IQ-Streamer
+# SmartSDR-IQ-Streamer
 
-SDR-IQ-Streamer is an Avalonia desktop app that launches and synchronizes CW Skimmer with FlexRadio DAX-IQ streams.
-Support for other SDR IQ streams may be feasible by replacing the `FlexLib_API_v4` integration when equivalent APIs are available from other SDR platforms.
-License: MIT (see `LICENSE`)
+Modernizes CW Skimmer integration with FlexRadio DAX-IQ streams using a dedicated Avalonia desktop app.
+License: MIT (see `LICENSE`).
 
-This project is a work in progress. Development status is tracked in the roadmap below.
-
-## Quick Start
-
-### Release Package (for alpha testers)
-
-- Download the current release zip and run the included `SDRIQStreamer.exe`. There is nothing to install.
-- The current alpha publish is a self-contained `win-x64` build, so .NET runtime installation is not required on the test PC.
-- Runtime prerequisites still apply: SmartSDR + DAX and CW Skimmer must already be installed.
-- `FlexLib_API_v4.1.5.39794` is required to build from source, but is not required on a tester machine using the published release zip.
-
+## 1) Quick Start
 
 ### First-Time Setup / Get Started
 
-1. Launch `SDRIQStreamer.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
-2. In the app's CW Skimmer section, use **Browse...** to set the local path to `CwSkimmer.exe` (typically `C:\Program Files (x86)\Afreet\CwSkimmer\`).
-3. Set the `cwskimmer.ini` path to the INI created by running CW Skimmer manually at least once.
-4. In **Available Radio / Station Targets**, select the radio+station row you want to control and click **Connect**.
-5. Click **Launch** to start CW Skimmer. In CW Skimmer, open **View > Settings** and verify the **Radio**, **Audio**, and **Operator** tabs for your station.
-6. In the CW Skimmer toolbar, click **Start Radio** to begin decoding.
-7. Use the footer status tags (`[STREAMER]`, `[SKIMMER]`, `[TELNET]`) to verify connect, launch, and sync direction (VFO vs Skimmer click-tune).
+- Launch `SDRIQStreamer.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
+- Click the streamer's `Config` tab and set the local path to `CwSkimmer.exe` and the associated INI file. You may need to run CW Skimmer manually at least once to review and save initial settings.
+- In the `Operating` tab, click the radio and press **Connect**. After a few seconds you should see the available slices and IQ streams needed to launch CW Skimmer.
+- Once CW Skimmer is running, view settings and verify the `Radio`, `Audio`, and `Operator` tabs are correct for your station.
+- Click **Start** in the CW Skimmer toolbar to begin decoding.
+- Finally, click the streamer's `Logs` tab to see real-time events from `[STREAMER]`, `[SKIMMER]`, and `[TELNET]` to verify connect, launch, and sync direction (VFO vs Skimmer click-tune).
 
-### Development Prerequisites
+## 2) Technology Stack
+
+- UI: Avalonia (`net8.0-windows`)
+- App pattern: MVVM (`CommunityToolkit.Mvvm`)
+- Radio integration: FlexRadio FlexLib API `v4.1.5.39794`
+- CW decoder integration: CW Skimmer process + Telnet control channel
+
+## 3) High-Level Architecture
+
+- `MainWindowViewModel` orchestrates discovery, connection, DAX stream state, CW Skimmer launch/sync, and spot publishing.
+- `src/SmartSDRIQStreamer.FlexRadio` isolates FlexLib-specific discovery/connection and radio operations.
+- `src/SmartSDRIQStreamer.CWSkimmer` isolates CW Skimmer INI generation, process launch, Telnet control, and spot parsing.
+- UI is organized into tabs:
+  - `Operating`: radio target selection + stream/launch operations + live event line
+  - `Config`: CW Skimmer paths + spot controls + Telnet INI view
+  - `Logs`: consolidated streamer status output
+
+## 4) FlexRadio Integration Approach
+
+- Use local-network discovery and a single-radio connect model.
+- Track panadapters, slices, and DAX-IQ streams via FlexLib events.
+- Publish CW spots through FlexLib spot API with app-defined text/background color and lifetime.
+
+## 5) CW Skimmer Integration Approach
+
+- Build channel-specific managed INI files from a user-selected template.
+- Launch CW Skimmer per DAX-IQ channel and connect a Telnet client.
+- Runtime sync model:
+  - Slice frequency updates drive CW Skimmer QSY.
+  - Pan center movement triggers adaptive LO re-sync only when center shift exceeds half sample-rate bandwidth.
+- Parse `DX de` lines and forward valid spots to radio when spot forwarding is enabled.
+- Preserve CW Skimmer-owned config sections while writing runtime-managed sections (`[Audio]`, `[Telnet]`).
+
+## 6) Development Prerequisites
 
 - Windows 10/11
 - .NET SDK 8.x
 - SmartSDR + DAX installed and running
 - CW Skimmer installed
 - FLEX-6x00/8x00 radio reachable on local network
-- A local radio is required in the current implementation. VPN and SmartLink support are planned for a future release.
-- FlexLib API package downloaded and extracted to `FlexLib_API_v4.1.5.39794` in the project root (required to build).
+- Local radio required in the current implementation (SmartLink/VPN deferred)
+- FlexLib API package downloaded and extracted to `FlexLib_API_v4.1.5.39794` in project root
+
+## 7) Build, Run, Test
 
 ### Build
 
@@ -48,7 +71,7 @@ dotnet build
 dotnet run
 ```
 
-### Run (without `dotnet run` host overhead)
+### Run (Release executable)
 
 ```powershell
 dotnet build -c Release
@@ -61,32 +84,56 @@ dotnet build -c Release
 dotnet test tests
 ```
 
-## Project Layout
+## 8) Project Layout
 
-- Root app `.csproj`: Avalonia app entry point and UI
-- `src/*FlexRadio`: FlexLib adapter layer
-- `src/*CWSkimmer`: CW Skimmer config/launch/telnet integration
-- `FlexLib_API_v4.1.5.39794`: local FlexLib source/projects folder required by project references (not checked in)
-- `tests/*CWSkimmer.Tests`: unit tests for INI generation and mapping
+```text
+SDR-IQ-Streamer/
+├── SmartSDR-IQ-Streamer.MDC
+├── SmartSDRIQStreamer.csproj
+├── README.md
+├── SmartSDRIQStreamer.slnx
+├── Program.cs
+├── App.axaml / App.axaml.cs
+├── AppServices.cs
+├── MainWindow.axaml / MainWindow.axaml.cs
+├── CwSkimmerWorkflowService.cs
+├── FooterStatusBuffer.cs
+├── src/
+│   ├── SmartSDRIQStreamer.FlexRadio/
+│   └── SmartSDRIQStreamer.CWSkimmer/
+├── tests/
+│   └── SmartSDRIQStreamer.CWSkimmer.Tests/
+└── artifacts/
+```
 
-## Roadmap and Delivery Status
+## 9) Phase Status
 
-- **Phase 1 (Foundation)**: COMPLETE — local discovery, connect/disconnect, pan/slice visibility, and DAX-IQ stream request flow are implemented.
-- **Phase 2.1 (CW config + INI write)**: COMPLETE — unit-tested CW Skimmer INI generation is in place.
-- **Phase 2.2 (CW launch)**: COMPLETE — launch path and validated DAX device mappings are in place.
-- **Phase 2.3 (Runtime sync)**: COMPLETE for alpha-2 baseline — bidirectional QSY and runtime LO/QSY sync are functioning, including multi-station control gating.
-- **Phase 3 (Polish / hardening)**: IN PROGRESS — long-run stability, persistence edge cases, and UX/error refinement.
-- **Phase 3.1 (Bridge spots)**: COMPLETE (baseline) — CW Skimmer spots are parsed and forwarded to radio spots with configurable enable/disable, lifetime, text color, and background color.
-- **Phase 3.2 (RIT fine tuning sync)**: UPCOMING — propagate radio RIT fine-tuning offsets to CW Skimmer so receive tuning can move by small Hz offsets without changing transmit slice frequency.
-- **Phase 3.3 (Network quality monitor)**: UPCOMING — display radio-reported `current RTT` (real-time round-trip latency between station and radio) and `max RTT` (highest RTT value since reset).
-- **Phase 3.4 (Configuration pages)**: IN PROGRESS — tabbed `Config` and `Logs` views are in place with CW Skimmer path controls, spot controls, and Telnet INI/status visibility; additional refinements continue.
-- **Phase 3.5 (Operating page simplification)**: ITERATIVE ACROSS PHASE 3 — continuously polish the main operating page so it shows only essential operator information while 3.1-3.4 are delivered.
+- Phase 1 (Foundation): COMPLETE
+- Phase 2.1 (CW config + INI write): COMPLETE
+- Phase 2.2 (CW launch): COMPLETE
+- Phase 2.3 (Runtime sync): COMPLETE (with adaptive pan-center LO re-sync refinement)
+- Phase 3 (Polish / hardening): IN PROGRESS
+- Phase 3.1 (Bridge spots): COMPLETE baseline (forwarding, controls, diagnostics)
+- Phase 3.2 (RIT fine tuning sync): IN PROGRESS (baseline implemented, polish ongoing)
+- Phase 3.3 (Network quality monitor): UPCOMING
+- Phase 3.4 (Configuration pages): IN PROGRESS
+- Phase 3.5 (Operating page simplification): ITERATIVE ACROSS PHASE 3
 
-## Notes
+## 10) Phase 3.2 Focus (Today)
 
-- `FlexLib_API_v4.1.5.39794` is intentionally excluded from version control; download the API package and extract it to the project root before building.
+Target: propagate radio RIT fine-tuning offsets to CW Skimmer so receive tuning can move in small Hz steps without changing transmit slice frequency.
+
+- Define and use effective RX frequency: `slice base freq + RIT offset`.
+- Extend slice tracking to include RIT state changes (enabled + offset Hz).
+- Send incremental `SKIMMER/QSY` updates from effective RX frequency while preserving current debounce/echo suppression.
+- Add operator-visible status for RIT-driven retunes.
+- Validate with live `+/-` RIT adjustments: CW Skimmer follows offset; TX/base slice frequency does not move.
+
+## 11) Notes
+
+- `FlexLib_API_v4.1.5.39794` is intentionally excluded from version control.
 - Download FlexLib API (SmartSDR v4): [https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/](https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/)
-- Build currently emits legacy FlexLib warnings on `net8.0-windows`; this is tracked separately.
-- CW Skimmer per-channel INI and diagnostic files are written under `artifacts/cwskimmer/ini`.
-- On each launch, the app starts from the selected `cwskimmer.ini` template and writes channel-specific runtime settings.
-- The app updates only `[Audio]` and `[Telnet]` sections in the CW Skimmer INI and preserves CW Skimmer-managed sections (for example `[Windows]` and `[Radio]`).
+- Build may emit legacy FlexLib warnings on `net8.0-windows`; tracked separately.
+- Runtime artifacts:
+  - `artifacts/cwskimmer/ini` for per-channel INI and diagnostics
+  - `artifacts/logs` for runtime status logs

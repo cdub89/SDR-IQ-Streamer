@@ -296,3 +296,21 @@ public sealed class CwSkimmerIniModelFactoryTests
         Assert.Equal(-1, model.WdmAudioDevIndex);
     }
 }
+
+public sealed class FrequencyMathTests
+{
+    [Theory]
+    [InlineData(14.055090, 100, 14.055100)]
+    [InlineData(14.055010, 100, 14.055000)]
+    [InlineData(14.055490, 100, 14.055500)]
+    [InlineData(14.055090, 50, 14.055100)]
+    [InlineData(14.055010, 50, 14.055000)]
+    [InlineData(14.055025, 50, 14.055050)]
+    [InlineData(7.025149, 100, 7.025100)]
+    [InlineData(7.025150, 100, 7.025200)]
+    public void SnapMHzToStepHz_RoundsToNearestStep(double inputMHz, int stepHz, double expectedMHz)
+    {
+        var result = FrequencyMath.SnapMHzToStepHz(inputMHz, stepHz);
+        Assert.Equal(expectedMHz, result, precision: 6);
+    }
+}

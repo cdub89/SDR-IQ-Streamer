@@ -152,6 +152,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
     private CancellationTokenSource? _sliceSyncCts;
     private readonly object _syncDampenGate = new();
+    private readonly ThrottledStatusEmitter _ritStatusEmitter;
+    private readonly Dictionary<string, (bool RitEnabled, double RitOffsetHz)> _lastRitStateBySlice = new();
     private double _lastOutboundQsyMHz;
     private DateTime _lastOutboundQsyUtc;
     private double _lastInboundClickMHz;
@@ -161,6 +163,8 @@ public partial class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan EchoSuppressWindow = TimeSpan.FromMilliseconds(700);
     private const double DuplicateClickToleranceMHz = 0.000005; // 5 Hz
     private static readonly TimeSpan DuplicateClickWindow = TimeSpan.FromMilliseconds(250);
+    private const int FallbackClickSnapStepHz = 50;
+    private static readonly TimeSpan RitStatusMinInterval = TimeSpan.FromMilliseconds(500);
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
 
@@ -183,6 +187,7 @@ public partial class MainWindowViewModel : ObservableObject
         _settingsSession = settingsSession;
         _settings = _settingsSession.Settings;
         _footerStatusBuffer = new FooterStatusBuffer(FooterStatusLines);
+        _ritStatusEmitter = new ThrottledStatusEmitter(RitStatusMinInterval, UIPost, AddTelnetStatus);
         _cwSkimmerWorkflow = new CwSkimmerWorkflowService(_connection, _launcher, _settings);
 
         _discovery.RadioAdded   += OnRadioAdded;
@@ -230,13 +235,24 @@ public partial class MainWindowViewModel : ObservableObject
         {
             var slice = GetPreferredSliceForTune();
             if (slice is null) return;
-            double freqMHz = freqKhz / 1000.0;
-            if (ShouldSuppressInboundClick(freqMHz))
+            var rawFreqMHz = freqKhz / 1000.0;
+            var clickSnapStepHz = ResolveClickSnapStepHz(slice);
+            var snappedFreqMHz = FrequencyMath.SnapMHzToStepHz(rawFreqMHz, clickSnapStepHz);
+            if (ShouldSuppressInboundClick(snappedFreqMHz, clickSnapStepHz))
                 return;
 
-            _ = _connection.SetSliceFrequencyAsync(slice, freqMHz);
-            UIPost(() => AddTelnetStatus(
-                $"Click tune (Skimmer): {freqMHz:F6} MHz -> Slice {slice.Letter} ({slice.ClientStation})"));
+            _ = _connection.SetSliceFrequencyAsync(slice, snappedFreqMHz);
+            UIPost(() =>
+            {
+                if (Math.Abs(snappedFreqMHz - rawFreqMHz) >= 0.0000005)
+                {
+                    AddTelnetStatus(
+                        $"Click snap (Skimmer): {rawFreqMHz:F6} MHz -> {snappedFreqMHz:F6} MHz (step {clickSnapStepHz} Hz)");
+                }
+
+                AddTelnetStatus(
+                    $"Click tune (Skimmer): {snappedFreqMHz:F6} MHz -> Slice {slice.Letter} ({slice.ClientStation})");
+            });
         };
 
         _launcher.TelnetStatusChanged += message =>
@@ -343,6 +359,8 @@ public partial class MainWindowViewModel : ObservableObject
                 DaxStreamingSummary = "DAX Streaming : 0.0 Mbps (0 kbps)";
                 _lastCwDevicePreviewByChannel.Clear();
                 _lastLoCenterHzByChannel.Clear();
+                _lastRitStateBySlice.Clear();
+                _ritStatusEmitter.Clear();
                 AddStreamerStatus("Disconnected.");
             }
         });
@@ -493,12 +511,15 @@ public partial class MainWindowViewModel : ObservableObject
             if (vm is not null) { vm.Update(slice); break; }
         }
 
-        // Keep CW Skimmer's main window VFO in sync with the slice frequency
+        var effectiveRxFreqMHz = GetEffectiveRxFrequencyMHz(slice);
+        PublishRitSyncStatusIfChanged(slice, effectiveRxFreqMHz);
+
+        // Keep CW Skimmer's main window VFO in sync with the effective receive frequency.
         if (TelnetClusterEnabled &&
             IsCwSkimmerRunning &&
-            slice.FreqMHz > 0 &&
+            effectiveRxFreqMHz > 0 &&
             IsOwnStationSlice(slice))
-            QueueSliceSync(slice.FreqMHz);
+            QueueSliceSync(effectiveRxFreqMHz);
     }
 
     private ClientGroup GetOrCreateClientGroup(string station)
@@ -682,6 +703,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         if (IsCwSkimmerRunning) _launcher.Stop();
         if (IsConnected) _connection.Disconnect();
+        _ritStatusEmitter.Dispose();
         _discovery.Stop();
     }
 
@@ -1178,14 +1200,18 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private bool ShouldSuppressInboundClick(double freqMHz)
+    private bool ShouldSuppressInboundClick(double freqMHz, int clickSnapStepHz)
     {
         var now = DateTime.UtcNow;
+        var snapAwareEchoToleranceMHz = Math.Max(
+            EchoSuppressToleranceMHz,
+            Math.Max(1, clickSnapStepHz / 2) / 1_000_000d);
+
         lock (_syncDampenGate)
         {
             // Suppress immediate echo-back from our own outbound QSY commands.
             if ((now - _lastOutboundQsyUtc) <= EchoSuppressWindow &&
-                Math.Abs(freqMHz - _lastOutboundQsyMHz) <= EchoSuppressToleranceMHz)
+                Math.Abs(freqMHz - _lastOutboundQsyMHz) <= snapAwareEchoToleranceMHz)
             {
                 return true;
             }
@@ -1207,6 +1233,14 @@ public partial class MainWindowViewModel : ObservableObject
     {
         var ownSlice = _connection.Slices.FirstOrDefault(IsOwnStationSlice);
         return ownSlice ?? _connection.Slices.FirstOrDefault();
+    }
+
+    private static int ResolveClickSnapStepHz(SliceInfo slice)
+    {
+        if (slice.TuneStepHz > 0)
+            return slice.TuneStepHz;
+
+        return FallbackClickSnapStepHz;
     }
 
     private string ResolveSpotSourceIdentity(string baseCall)
@@ -1286,6 +1320,34 @@ public partial class MainWindowViewModel : ObservableObject
             p.DAXIQChannel == daxIqChannel &&
             string.Equals(p.ClientStation, SelectedControlStation, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static double GetEffectiveRxFrequencyMHz(SliceInfo slice)
+    {
+        var ritOffsetHz = slice.RitEnabled ? slice.RitOffsetHz : 0d;
+        return slice.FreqMHz + (ritOffsetHz / 1_000_000d);
+    }
+
+    private void PublishRitSyncStatusIfChanged(SliceInfo slice, double effectiveRxFreqMHz)
+    {
+        var key = BuildSliceRitKey(slice);
+        var roundedOffsetHz = Math.Round(slice.RitOffsetHz, 3);
+        var current = (slice.RitEnabled, roundedOffsetHz);
+
+        if (_lastRitStateBySlice.TryGetValue(key, out var previous) && previous.Equals(current))
+            return;
+
+        _lastRitStateBySlice[key] = current;
+        if (!slice.RitEnabled || Math.Abs(roundedOffsetHz) < 0.5)
+            return;
+
+        if (!TelnetClusterEnabled || !IsCwSkimmerRunning || !IsOwnStationSlice(slice))
+            return;
+
+        _ritStatusEmitter.Enqueue($"RIT sync: {roundedOffsetHz:+0;-0} Hz -> {effectiveRxFreqMHz:F6} MHz");
+    }
+
+    private static string BuildSliceRitKey(SliceInfo slice)
+        => $"{slice.ClientStation}|{slice.Letter}";
 
     private bool ShouldResyncLoForPanCenterMove(int channel, long centerHz, long halfBandwidthHz)
     {
