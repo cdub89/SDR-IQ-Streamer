@@ -3,6 +3,9 @@
 Modernizes CW Skimmer integration with FlexRadio DAX-IQ streams using a dedicated Avalonia desktop app.
 License: MIT (see `LICENSE`).
 
+<img width="416" height="389" alt="image" src="https://github.com/user-attachments/assets/513f0fc2-b1c8-4748-8dc3-26dd06373612" />
+
+
 ## 1) Quick Start
 
 ### First-Time Setup / Get Started
@@ -114,22 +117,12 @@ SDR-IQ-Streamer/
 - Phase 2.3 (Runtime sync): COMPLETE (with adaptive pan-center LO re-sync refinement)
 - Phase 3 (Polish / hardening): IN PROGRESS
 - Phase 3.1 (Bridge spots): COMPLETE baseline (forwarding, controls, diagnostics)
-- Phase 3.2 (RIT fine tuning sync): IN PROGRESS (baseline implemented, polish ongoing)
-- Phase 3.3 (Network quality monitor): UPCOMING
+- Phase 3.2 (RIT fine tuning sync): COMPLETE (baseline implemented, polish ongoing)
+- Phase 3.3 (Network quality monitor): COMPLETE
 - Phase 3.4 (Configuration pages): IN PROGRESS
 - Phase 3.5 (Operating page simplification): ITERATIVE ACROSS PHASE 3
 
-## 10) Phase 3.2 Focus (Today)
-
-Target: propagate radio RIT fine-tuning offsets to CW Skimmer so receive tuning can move in small Hz steps without changing transmit slice frequency.
-
-- Define and use effective RX frequency: `slice base freq + RIT offset`.
-- Extend slice tracking to include RIT state changes (enabled + offset Hz).
-- Send incremental `SKIMMER/QSY` updates from effective RX frequency while preserving current debounce/echo suppression.
-- Add operator-visible status for RIT-driven retunes.
-- Validate with live `+/-` RIT adjustments: CW Skimmer follows offset; TX/base slice frequency does not move.
-
-## 11) Notes
+## 10) Notes
 
 - `FlexLib_API_v4.1.5.39794` is intentionally excluded from version control.
 - Download FlexLib API (SmartSDR v4): [https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/](https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/)
