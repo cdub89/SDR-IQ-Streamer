@@ -27,7 +27,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly FooterStatusBuffer _footerStatusBuffer;
     private readonly CwSkimmerWorkflowService _cwSkimmerWorkflow;
-    private static readonly (string ReleaseTag, string CommitHash, string Display) s_appBuildInfo =
+private static readonly (string ReleaseTag, string CommitHash, string Display, string BuildDate) s_appBuildInfo =
         ResolveAppBuildInfo();
 
     // ── Discovered radios ─────────────────────────────────────────────────────
@@ -47,10 +47,17 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor("ConnectCommand")]
     [NotifyCanExecuteChangedFor("DisconnectCommand")]
+    [NotifyCanExecuteChangedFor(nameof(ResetNetworkStatusCommand))]
     private bool _isConnected;
 
     [ObservableProperty]
-    private string _connectionStatus = string.Empty;
+    private string _networkStatusLabel = "--";
+
+    [ObservableProperty]
+    private string _networkLatencyRttText = "--";
+
+    [ObservableProperty]
+    private string _networkMaxLatencyRttText = "--";
 
     // ── Post-connect details ──────────────────────────────────────────────────
 
@@ -193,9 +200,33 @@ public partial class MainWindowViewModel : ObservableObject
     private string _latestFooterEvent = string.Empty;
 
     public string AppReleaseTag => s_appBuildInfo.ReleaseTag;
+    public string AppReleaseDisplay => FormatReleaseForHelp(AppReleaseTag);
     public string AppCommitHash => s_appBuildInfo.CommitHash;
     public string AppBuildDisplay => s_appBuildInfo.Display;
+    public string AppBuildDate => s_appBuildInfo.BuildDate;
     public string WindowTitle => $"SDR-IQ-Streamer {AppBuildDisplay}";
+    public string ConnectTargetHeaderColor => IsConnected ? "Green" : "Gray";
+    public string ConnectTargetHeaderText
+    {
+        get
+        {
+            if (!IsConnected)
+                return "Available Radios";
+
+            var radioName = ResolveConnectedRadioDisplayName();
+
+            var stationName = !string.IsNullOrWhiteSpace(SelectedControlStation)
+                ? SelectedControlStation
+                : OwnClientStation;
+            if (string.IsNullOrWhiteSpace(stationName))
+                stationName = "Unknown Station";
+
+            return $"Connected: {radioName} - {stationName}";
+        }
+    }
+
+    public string AboutDevelopedBy => "Developed by Chris L White, WX7V and Cursor.AI Premium Agent v31.14";
+    public string AboutLicenseReference => "Licensed under the MIT License. See LICENSE for full terms.";
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -229,6 +260,7 @@ public partial class MainWindowViewModel : ObservableObject
             _radioAvgDaxKbps = kbps;
             UpdateDisplayedDaxKbps();
         });
+        _connection.NetworkStatusChanged   += status => UIPost(() => ApplyNetworkStatus(status));
 
         // Re-evaluate Launch command whenever the stream list changes
         DaxIQStreams.CollectionChanged += (_, _) =>
@@ -339,9 +371,8 @@ public partial class MainWindowViewModel : ObservableObject
         if (SelectedConnectTarget is null) return;
 
         SetSelectedControlStation(SelectedConnectTarget.Station);
-        ConnectionStatus = $"Connecting to {SelectedConnectTarget.Radio.Model} ({SelectedControlStation})…";
         bool ok = await _connection.ConnectAsync(SelectedConnectTarget.Radio);
-        if (!ok) ConnectionStatus = "Connection failed.";
+        if (!ok) AddStreamerStatus("Connection failed.");
     }
 
     private bool CanConnect() => SelectedConnectTarget is not null && !IsConnected;
@@ -356,9 +387,10 @@ public partial class MainWindowViewModel : ObservableObject
         UIPost(() =>
         {
             IsConnected = connected;
+            OnPropertyChanged(nameof(ConnectTargetHeaderColor));
+            OnPropertyChanged(nameof(ConnectTargetHeaderText));
             if (connected)
             {
-                ConnectionStatus = $"Connected: {_connection.ConnectedModel}  {_connection.Versions}";
                 OwnClientStation = _connection.OwnClientStation;
                 OnPropertyChanged(nameof(OwnClientStation));
                 EnsureSelectedControlStation();
@@ -372,12 +404,12 @@ public partial class MainWindowViewModel : ObservableObject
 
                 _radioAvgDaxKbps = _connection.AvgDAXKbps;
                 UpdateDisplayedDaxKbps();
+                ApplyNetworkStatus(_connection.NetworkStatus);
                 AddStreamerStatus($"Connected to {_connection.ConnectedModel}.");
                 AddStreamerStatus($"Control station: {SelectedControlStation}");
             }
             else
             {
-                ConnectionStatus = string.Empty;
                 OwnClientStation = string.Empty;
                 OnPropertyChanged(nameof(OwnClientStation));
                 SetSelectedControlStation(string.Empty);
@@ -386,6 +418,7 @@ public partial class MainWindowViewModel : ObservableObject
                 _radioAvgDaxKbps = 0;
                 AvgDAXKbps = 0;
                 DaxStreamingSummary = "DAX Streaming : 0.0 Mbps (0 kbps)";
+                ResetDisplayedNetworkStatus();
                 _lastCwDevicePreviewByChannel.Clear();
                 _lastLoCenterHzByChannel.Clear();
                 _lastRitStateBySlice.Clear();
@@ -568,6 +601,7 @@ public partial class MainWindowViewModel : ObservableObject
             };
             panEntry.Slices.Add(vm);
         }
+
         LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(VisibleClientGroups));
@@ -604,19 +638,7 @@ public partial class MainWindowViewModel : ObservableObject
             if (vm is not null) { vm.Update(slice); break; }
         }
 
-        var effectiveRxFreqMHz = GetEffectiveRxFrequencyMHz(slice);
-        PublishRitSyncStatusIfChanged(slice, effectiveRxFreqMHz);
-
-        // Keep CW Skimmer's main window VFO in sync with the effective receive frequency.
-        if (TelnetClusterEnabled &&
-            IsCwSkimmerRunning &&
-            effectiveRxFreqMHz > 0 &&
-            IsOwnStationSlice(slice))
-        {
-            var daxIqChannel = ResolveSliceDaxIqChannel(slice);
-            if (daxIqChannel > 0)
-                QueueSliceSync(daxIqChannel, effectiveRxFreqMHz);
-        }
+        TrySyncSliceToSkimmer(slice);
     }
 
     private ClientGroup GetOrCreateClientGroup(string station)
@@ -789,6 +811,16 @@ public partial class MainWindowViewModel : ObservableObject
         var stream = ResolveSliceLaunchStream(sliceVm);
         return _cwSkimmerWorkflow.CanStop(stream);
     }
+
+    [RelayCommand(CanExecute = nameof(CanResetNetworkStatus))]
+    private void ResetNetworkStatus()
+    {
+        _connection.ResetNetworkStatus();
+        ApplyNetworkStatus(_connection.NetworkStatus);
+        AddStreamerStatus("Network status reset.");
+    }
+
+    private bool CanResetNetworkStatus() => IsConnected;
 
     private DaxIQStreamInfo? ResolveSliceLaunchStream(SliceViewModel? sliceVm)
     {
@@ -1312,7 +1344,7 @@ public partial class MainWindowViewModel : ObservableObject
         return Path.Combine(appDataRoot, "artifacts", "cwskimmer", "ini");
     }
 
-    private static (string ReleaseTag, string CommitHash, string Display) ResolveAppBuildInfo()
+    private static (string ReleaseTag, string CommitHash, string Display, string BuildDate) ResolveAppBuildInfo()
     {
         var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
         var informationalVersion =
@@ -1328,10 +1360,30 @@ public partial class MainWindowViewModel : ObservableObject
                     ?.Value)
             ?? "unknown";
 
+        var displayTag = NormalizeVersionDisplayTag(releaseTag);
         var display = commit == "unknown"
-            ? $"v{releaseTag}"
-            : $"v{releaseTag} ({commit})";
-        return (releaseTag, commit, display);
+            ? displayTag
+            : $"{displayTag} ({commit})";
+        var buildDate = ResolveBuildDate(assembly);
+        return (releaseTag, commit, display, buildDate);
+    }
+
+    private static string NormalizeVersionDisplayTag(string releaseTag)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(releaseTag) ? "dev" : releaseTag.Trim();
+        return trimmed.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"v{trimmed}";
+    }
+
+    private static string FormatReleaseForHelp(string releaseTag)
+    {
+        var trimmed = string.IsNullOrWhiteSpace(releaseTag) ? "dev" : releaseTag.Trim();
+        if (trimmed.StartsWith("v.", StringComparison.OrdinalIgnoreCase))
+            return trimmed;
+        if (trimmed.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            return $"v.{trimmed[1..]}";
+        return $"v.{trimmed}";
     }
 
     private static string? ResolveReleaseTag(Assembly assembly, string? informationalVersion)
@@ -1430,6 +1482,49 @@ public partial class MainWindowViewModel : ObservableObject
             return null;
 
         return output.Trim();
+    }
+
+    private static string ResolveBuildDate(Assembly assembly)
+    {
+        var metadataDate = assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(x => string.Equals(x.Key, "BuildDate", StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+
+        if (!string.IsNullOrWhiteSpace(metadataDate))
+        {
+            if (DateTime.TryParse(metadataDate, out var parsedMetadataDate))
+                return parsedMetadataDate.ToString("M/d/yyyy");
+            return metadataDate.Trim();
+        }
+
+        try
+        {
+            var location = assembly.Location;
+            if (!string.IsNullOrWhiteSpace(location) && File.Exists(location))
+                return File.GetLastWriteTime(location).ToString("M/d/yyyy");
+        }
+        catch
+        {
+            // Fallback handled below.
+        }
+
+        return "--";
+    }
+
+    private string ResolveConnectedRadioDisplayName()
+    {
+        var connectedSerial = _connection.ConnectedSerial;
+        if (!string.IsNullOrWhiteSpace(connectedSerial))
+        {
+            var discovered = Radios.FirstOrDefault(r => string.Equals(r.Serial, connectedSerial, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(discovered?.Nickname))
+                return discovered.Nickname;
+        }
+
+        return !string.IsNullOrWhiteSpace(_connection.ConnectedModel)
+            ? _connection.ConnectedModel
+            : "Connected Radio";
     }
 
     private int ResolveSliceDaxIqChannel(SliceInfo slice)
@@ -1616,6 +1711,25 @@ public partial class MainWindowViewModel : ObservableObject
         return hasLetter && hasDigit;
     }
 
+    private void TrySyncSliceToSkimmer(SliceInfo slice)
+    {
+        var effectiveRxFreqMHz = GetEffectiveRxFrequencyMHz(slice);
+        PublishRitSyncStatusIfChanged(slice, effectiveRxFreqMHz);
+
+        // Keep CW Skimmer's main window VFO in sync with effective RX frequency.
+        if (!TelnetClusterEnabled ||
+            !IsCwSkimmerRunning ||
+            effectiveRxFreqMHz <= 0 ||
+            !IsOwnStationSlice(slice))
+        {
+            return;
+        }
+
+        var daxIqChannel = ResolveSliceDaxIqChannel(slice);
+        if (daxIqChannel > 0)
+            QueueSliceSync(daxIqChannel, effectiveRxFreqMHz);
+    }
+
     private bool IsOwnStationSlice(SliceInfo slice)
     {
         if (string.IsNullOrWhiteSpace(SelectedControlStation))
@@ -1741,6 +1855,7 @@ public partial class MainWindowViewModel : ObservableObject
         SelectedControlStation = station;
         OnPropertyChanged(nameof(SelectedControlStation));
         OnPropertyChanged(nameof(VisibleClientGroups));
+        OnPropertyChanged(nameof(ConnectTargetHeaderText));
     }
 
     private void RebuildConnectTargets()
@@ -1777,6 +1892,35 @@ public partial class MainWindowViewModel : ObservableObject
             t.Radio.Serial == selected.Radio.Serial &&
             string.Equals(t.Station, selected.Station, StringComparison.OrdinalIgnoreCase))
             ?? ConnectTargets.FirstOrDefault();
+    }
+
+    private void ApplyNetworkStatus(NetworkStatusInfo status)
+    {
+        var isDisconnected = status.CurrentRttMs < 0 && status.MaxRttMs < 0;
+        if (isDisconnected)
+        {
+            NetworkStatusLabel = "--";
+            NetworkLatencyRttText = "--";
+            NetworkMaxLatencyRttText = "--";
+            return;
+        }
+
+        NetworkStatusLabel = status.Health switch
+        {
+            NetworkHealthLevel.Excellent => "Excellent",
+            NetworkHealthLevel.Good => "Good",
+            NetworkHealthLevel.Poor => "Poor",
+            _ => "Poor"
+        };
+        NetworkLatencyRttText = status.CurrentRttMs >= 0 ? $"{status.CurrentRttMs} ms" : "--";
+        NetworkMaxLatencyRttText = status.MaxRttMs >= 0 ? $"{status.MaxRttMs} ms" : "--";
+    }
+
+    private void ResetDisplayedNetworkStatus()
+    {
+        NetworkStatusLabel = "--";
+        NetworkLatencyRttText = "--";
+        NetworkMaxLatencyRttText = "--";
     }
 
     private static void UIPost(System.Action action) => Dispatcher.UIThread.Post(action);

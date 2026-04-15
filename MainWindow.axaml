@@ -31,23 +31,19 @@
         </TabControl.Styles>
         <TabItem>
             <TabItem.Header>
-                <TextBlock Text="Operating" FontSize="10" FontWeight="SemiBold"/>
+                <TextBlock Text="Operating" FontSize="11" FontWeight="Bold"/>
             </TabItem.Header>
             <StackPanel Margin="8" Spacing="4">
-                    <TextBlock Text="SDR-IQ-Streamer"
-                               FontSize="15" FontWeight="SemiBold"
-                               Margin="0,0,0,4"/>
-
-                    <TextBlock Text="{Binding ConnectionStatus}"
-                               FontSize="12" Foreground="Green"
-                               IsVisible="{Binding IsConnected}"/>
-
                     <TextBlock Text="{Binding StatusText}"
                                FontSize="12" Foreground="Gray"
                                IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
                     <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,2">
-                        <TextBlock Grid.Column="0" Text="Available Radio / Station Targets" FontSize="11" Foreground="Gray"/>
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding ConnectTargetHeaderText}"
+                                   FontSize="11"
+                                   FontWeight="Bold"
+                                   Foreground="{Binding ConnectTargetHeaderColor}"/>
                         <Button Grid.Column="1"
                                 Content="Connect"
                                 MinWidth="56"
@@ -84,7 +80,7 @@
                                 <StackPanel Spacing="4" Margin="0,4,0,0">
                                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
                                         <TextBlock Grid.Column="0"
-                                                   FontSize="12" FontWeight="SemiBold">
+                                                   FontSize="11" FontWeight="SemiBold" Foreground="Green">
                                             <TextBlock.Text>
                                                 <MultiBinding StringFormat="Station:  {0}">
                                                     <Binding Path="Station"/>
@@ -148,24 +144,66 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <Separator Margin="0,6,0,2" Background="#DDD"/>
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,0,0,1">
-                        <TextBlock Grid.Column="0" Text="Event" FontSize="10" Foreground="Gray" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="1"
-                                   Text="{Binding LatestFooterEvent}"
-                                   FontSize="10"
-                                   Foreground="DarkOrange"
-                                   TextWrapping="NoWrap"
-                                   TextTrimming="CharacterEllipsis"
-                                   VerticalAlignment="Center"/>
-                    </Grid>
+                    <TextBlock Text="Network Status"
+                               FontSize="11"
+                               FontWeight="Bold"
+                               Foreground="Gray"
+                               Margin="0,6,0,0"/>
+                    <Border BorderBrush="#E3E6EA"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="8"
+                            Margin="0,1,0,2">
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="4">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Connection Status" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding NetworkStatusLabel}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Latency (RTT)" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding NetworkLatencyRttText}" FontSize="11" VerticalAlignment="Center"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Max Latency (RTT)" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding NetworkMaxLatencyRttText}" FontSize="11" VerticalAlignment="Center"/>
+
+                            <Button Grid.Row="0"
+                                    Grid.RowSpan="3"
+                                    Grid.Column="2"
+                                    Content="Reset Status"
+                                    MinWidth="84"
+                                    Height="20"
+                                    FontSize="10"
+                                    Padding="8,0"
+                                    Command="{Binding ResetNetworkStatusCommand}"
+                                    IsEnabled="{Binding IsConnected}"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <Border BorderBrush="#E3E6EA"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="6"
+                            Margin="0,6,0,0">
+                        <StackPanel Spacing="2">
+                            <Separator Margin="0,0,0,2" Background="#DDD"/>
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Margin="0,0,0,1">
+                                <TextBlock Grid.Column="0" Text="Event" FontSize="10" Foreground="Gray" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding LatestFooterEvent}"
+                                           FontSize="10"
+                                           Foreground="DarkOrange"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
 
             </StackPanel>
         </TabItem>
 
         <TabItem>
             <TabItem.Header>
-                <TextBlock Text="Config" FontSize="10" FontWeight="SemiBold"/>
+                <TextBlock Text="Config" FontSize="11" FontWeight="Bold"/>
             </TabItem.Header>
             <DockPanel Margin="8" LastChildFill="True">
                     <DockPanel.Styles>
@@ -178,8 +216,6 @@
                         </Style>
                     </DockPanel.Styles>
                     <StackPanel DockPanel.Dock="Top" Spacing="6">
-                    <TextBlock Text="Configuration" FontSize="15" FontWeight="SemiBold"/>
-
                     <TextBlock Text="CW Skimmer paths" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
                     <Grid ColumnDefinitions="*,70" ColumnSpacing="6">
                         <TextBox Grid.Column="0"
@@ -338,7 +374,7 @@
 
         <TabItem>
             <TabItem.Header>
-                <TextBlock Text="Logs" FontSize="10" FontWeight="SemiBold"/>
+                <TextBlock Text="Logs" FontSize="11" FontWeight="Bold"/>
             </TabItem.Header>
             <Grid Margin="8" RowDefinitions="Auto,*" RowSpacing="6">
                 <TextBlock Grid.Row="0" Text="Streamer status" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
@@ -355,6 +391,38 @@
                              ScrollViewer.VerticalScrollBarVisibility="Auto"/>
                 </Border>
             </Grid>
+        </TabItem>
+
+        <TabItem>
+            <TabItem.Header>
+                <TextBlock Text="Help" FontSize="11" FontWeight="Bold"/>
+            </TabItem.Header>
+            <ScrollViewer Margin="8"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="About" FontSize="15" FontWeight="SemiBold"/>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Release:" FontSize="11" Foreground="Gray"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding AppReleaseDisplay}" FontSize="11"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Commit:" FontSize="11" Foreground="Gray"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding AppCommitHash}" FontSize="11"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Date:" FontSize="11" Foreground="Gray"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding AppBuildDate}" FontSize="11"/>
+                    </Grid>
+
+                    <Border BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="8">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="License" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
+                            <TextBlock Text="{Binding AboutLicenseReference}" FontSize="11" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="{Binding AboutDevelopedBy}" FontSize="11" TextWrapping="Wrap"/>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
     </TabControl>
 </Window>

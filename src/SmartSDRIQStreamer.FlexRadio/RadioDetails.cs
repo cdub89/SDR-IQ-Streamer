@@ -54,3 +54,20 @@ public sealed record DaxIQStreamInfo(
     public string SkimmerRowLabel =>
         $"DAX-IQ ch {DAXIQChannel}  {(IsActive ? "Active" : "Off")}";
 }
+
+public enum NetworkHealthLevel
+{
+    Unknown,
+    Excellent,
+    Good,
+    Poor
+}
+
+public sealed record NetworkStatusInfo(
+    NetworkHealthLevel Health,
+    int CurrentRttMs,
+    int MaxRttMs)
+{
+    public static NetworkStatusInfo Empty { get; } =
+        new(NetworkHealthLevel.Unknown, -1, -1);
+}

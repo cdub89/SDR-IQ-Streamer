@@ -16,6 +16,7 @@ public sealed class FlexLibRadioConnection : IRadioConnection
 {
     private const double SliceNoOpToleranceMHz = 0.000001; // 1 Hz
     private Radio? _radio;
+    private int _maxObservedNetworkPing = -1;
 
     // ── Connection ───────────────────────────────────────────────────────────
 
@@ -63,6 +64,9 @@ public sealed class FlexLibRadioConnection : IRadioConnection
             _daxIQStreams[iq.DAXIQChannel] = ToDaxIQStreamInfo(iq);
         }
 
+        _maxObservedNetworkPing = -1;
+        PublishNetworkStatus();
+
         return true;
     }
 
@@ -87,6 +91,9 @@ public sealed class FlexLibRadioConnection : IRadioConnection
         _flexSlices.Clear();
         _daxIQStreams.Clear();
         _flexDaxIQStreams.Clear();
+        _maxObservedNetworkPing = -1;
+        NetworkStatus = NetworkStatusInfo.Empty;
+        NetworkStatusChanged?.Invoke(NetworkStatus);
         ConnectionStateChanged?.Invoke(false);
     }
 
@@ -110,6 +117,10 @@ public sealed class FlexLibRadioConnection : IRadioConnection
                 break;
             case "AvgDAXkbps":
                 if (_radio is not null) AvgDAXKbpsChanged?.Invoke(_radio.AvgDAXkbps);
+                break;
+            case "NetworkPing":
+            case "RemoteNetworkQuality":
+                PublishNetworkStatus();
                 break;
         }
     }
@@ -338,6 +349,16 @@ public sealed class FlexLibRadioConnection : IRadioConnection
 
     public int AvgDAXKbps => _radio?.AvgDAXkbps ?? 0;
     public event Action<int>? AvgDAXKbpsChanged;
+    public event Action<NetworkStatusInfo>? NetworkStatusChanged;
+
+    public NetworkStatusInfo NetworkStatus { get; private set; } = NetworkStatusInfo.Empty;
+
+    public void ResetNetworkStatus()
+    {
+        _maxObservedNetworkPing = -1;
+        NetworkStatus = NetworkStatusInfo.Empty;
+        NetworkStatusChanged?.Invoke(NetworkStatus);
+    }
 
     // ── Own client handle ────────────────────────────────────────────────────
 
@@ -552,5 +573,38 @@ public sealed class FlexLibRadioConnection : IRadioConnection
     {
         var effective = string.IsNullOrWhiteSpace(source) ? "CWSkimmer" : source.Trim();
         return effective.Replace(' ', '_');
+    }
+
+    private void PublishNetworkStatus()
+    {
+        var radio = _radio;
+        if (radio is null || !radio.Connected)
+        {
+            NetworkStatus = NetworkStatusInfo.Empty;
+            NetworkStatusChanged?.Invoke(NetworkStatus);
+            return;
+        }
+
+        var currentPing = radio.NetworkPing;
+        if (currentPing >= 0)
+            _maxObservedNetworkPing = Math.Max(_maxObservedNetworkPing, currentPing);
+
+        var maxPing = _maxObservedNetworkPing >= 0 ? _maxObservedNetworkPing : currentPing;
+        NetworkStatus = new NetworkStatusInfo(
+            MapHealth(radio.RemoteNetworkQuality),
+            currentPing,
+            maxPing);
+        NetworkStatusChanged?.Invoke(NetworkStatus);
+    }
+
+    private static NetworkHealthLevel MapHealth(NetworkQuality quality)
+    {
+        return quality switch
+        {
+            NetworkQuality.EXCELLENT or NetworkQuality.VERYGOOD => NetworkHealthLevel.Excellent,
+            NetworkQuality.GOOD or NetworkQuality.FAIR => NetworkHealthLevel.Good,
+            NetworkQuality.POOR or NetworkQuality.OFF => NetworkHealthLevel.Poor,
+            _ => NetworkHealthLevel.Unknown
+        };
     }
 }

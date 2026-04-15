@@ -37,6 +37,9 @@ public interface IRadioConnection
     /// <summary>Rolling average DAX bandwidth in kbps (all DAX channels combined).</summary>
     int AvgDAXKbps { get; }
 
+    /// <summary>Current network health and RTT values for the connected radio session.</summary>
+    NetworkStatusInfo NetworkStatus { get; }
+
     /// <summary>
     /// Request a DAX-IQ stream for the panadapter associated with <paramref name="pan"/>.
     /// Returns the outcome; on Success the stream will appear in DaxIQStreams.
@@ -64,6 +67,9 @@ public interface IRadioConnection
     /// <summary>Fires when AvgDAXKbps changes.</summary>
     event Action<int> AvgDAXKbpsChanged;
 
+    /// <summary>Fires when network quality or RTT values change.</summary>
+    event Action<NetworkStatusInfo> NetworkStatusChanged;
+
     /// <summary>
     /// Tune the given slice to <paramref name="freqMHz"/>.
     /// No-op if the slice is not found or the radio is not connected.
@@ -75,4 +81,10 @@ public interface IRadioConnection
     /// No-op when disconnected or when spot payload is invalid.
     /// </summary>
     Task PublishSpotAsync(RadioSpotInfo spot);
+
+    /// <summary>
+    /// Reset session network status display values.
+    /// Subsequent FlexLib updates repopulate current and max RTT values.
+    /// </summary>
+    void ResetNetworkStatus();
 }
