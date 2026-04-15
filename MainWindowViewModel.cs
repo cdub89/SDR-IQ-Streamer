@@ -1388,17 +1388,24 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     private static string? ResolveReleaseTag(Assembly assembly, string? informationalVersion)
     {
-        // Prefer explicit git tags so runtime log reflects release labels like alpha.2/alpha.3.
+        // Prefer an explicit tag on HEAD when present.
         var exactTag = TryGetGitTag(pointsAtHead: true);
         if (!string.IsNullOrWhiteSpace(exactTag))
             return exactTag;
 
+        // Otherwise trust assembly/package version so release builds without a new git tag
+        // still report the intended release version (for example alpha.5 before tagging).
+        var assemblyVersion = ExtractVersion(informationalVersion)
+            ?? assembly.GetName().Version?.ToString(3);
+        if (!string.IsNullOrWhiteSpace(assemblyVersion))
+            return assemblyVersion;
+
+        // Final fallback: latest repository tag.
         var latestTag = TryGetGitTag(pointsAtHead: false);
         if (!string.IsNullOrWhiteSpace(latestTag))
             return latestTag;
 
-        return ExtractVersion(informationalVersion)
-            ?? assembly.GetName().Version?.ToString(3);
+        return null;
     }
 
     private static string? ExtractVersion(string? informationalVersion)
