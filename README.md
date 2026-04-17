@@ -42,8 +42,9 @@ License: MIT (see `LICENSE`).
 - Build channel-specific managed INI files from a user-selected template.
 - Launch CW Skimmer per DAX-IQ channel and connect a Telnet client.
 - Runtime sync model:
-  - Slice frequency updates drive CW Skimmer QSY.
-  - Pan center movement triggers adaptive LO re-sync only when center shift exceeds half sample-rate bandwidth.
+  - Slice frequency updates drive channel-matched `SKIMMER/QSY`.
+  - Pan center or band changes trigger channel-matched `SKIMMER/LO_FREQ` plus an immediate effective-RX `SKIMMER/QSY` re-assert.
+  - A short delayed QSY stability resend follows pan/band-driven LO updates to keep CW Skimmer VFO display aligned after transient UI/state shifts.
 - Parse `DX de` lines and forward valid spots to radio when spot forwarding is enabled.
 - Preserve CW Skimmer-owned config sections while writing runtime-managed sections (`[Audio]`, `[Telnet]`).
 
@@ -106,34 +107,12 @@ SDR-IQ-Streamer/
 └── artifacts/
 ```
 
-## 9) Phase Status
-
-- Phase 1 (Foundation): COMPLETE
-- Phase 2.1 (CW config + INI write): COMPLETE
-- Phase 2.2 (CW launch): COMPLETE
-- Phase 2.3 (Runtime sync): COMPLETE (with adaptive pan-center LO re-sync refinement)
-- Phase 3 (Polish / hardening): IN PROGRESS
-- Phase 3.1 (Bridge spots): COMPLETE baseline (forwarding, controls, diagnostics)
-- Phase 3.2 (RIT fine tuning sync): IN PROGRESS (baseline implemented, polish ongoing)
-- Phase 3.3 (Network quality monitor): UPCOMING
-- Phase 3.4 (Configuration pages): IN PROGRESS
-- Phase 3.5 (Operating page simplification): ITERATIVE ACROSS PHASE 3
-
-## 10) Phase 3.2 Focus (Today)
-
-Target: propagate radio RIT fine-tuning offsets to CW Skimmer so receive tuning can move in small Hz steps without changing transmit slice frequency.
-
-- Define and use effective RX frequency: `slice base freq + RIT offset`.
-- Extend slice tracking to include RIT state changes (enabled + offset Hz).
-- Send incremental `SKIMMER/QSY` updates from effective RX frequency while preserving current debounce/echo suppression.
-- Add operator-visible status for RIT-driven retunes.
-- Validate with live `+/-` RIT adjustments: CW Skimmer follows offset; TX/base slice frequency does not move.
-
-## 11) Notes
+## 9) Notes
 
 - `FlexLib_API_v4.1.5.39794` is intentionally excluded from version control.
 - Download FlexLib API (SmartSDR v4): [https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/](https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/)
 - Build may emit legacy FlexLib warnings on `net8.0-windows`; tracked separately.
+- Phase status and roadmap tracking are maintained in `SmartSDR-IQ-Streamer.MDC` (single source of truth).
 - Runtime artifacts:
   - `artifacts/cwskimmer/ini` for per-channel INI and diagnostics
   - `artifacts/logs` for runtime status logs

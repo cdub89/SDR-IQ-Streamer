@@ -138,6 +138,16 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private bool _hasStreamerIniFolder;
 
     [ObservableProperty]
+    private string _logsFolderPathText = "(not available)";
+
+    [ObservableProperty]
+    private string _logsFolderPath = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenLogsFolderCommand))]
+    private bool _hasLogsFolder;
+
+    [ObservableProperty]
     private bool _spotForwardingEnabled = true;
 
     [ObservableProperty]
@@ -181,11 +191,13 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private readonly Dictionary<int, string> _lastCwDevicePreviewByChannel = new();
     private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _sliceSyncCtsByChannel = new();
+    private readonly Dictionary<int, CancellationTokenSource> _stabilityResendCtsByChannel = new();
     private readonly object _syncDampenGate = new();
     private readonly ThrottledStatusEmitter _ritStatusEmitter;
     private readonly Dictionary<string, (bool RitEnabled, double RitOffsetHz)> _lastRitStateBySlice = new();
     private readonly Dictionary<int, (double FreqMHz, DateTime Utc)> _lastOutboundQsyByChannel = new();
     private readonly Dictionary<int, (double FreqMHz, DateTime Utc)> _lastInboundClickByChannel = new();
+    private bool _isApplyingStartupSettings;
 
     private const double EchoSuppressToleranceMHz = 0.000010; // 10 Hz
     private static readonly TimeSpan EchoSuppressWindow = TimeSpan.FromMilliseconds(700);
@@ -193,6 +205,8 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private static readonly TimeSpan DuplicateClickWindow = TimeSpan.FromMilliseconds(250);
     private const int FallbackClickSnapStepHz = 50;
     private static readonly TimeSpan RitStatusMinInterval = TimeSpan.FromMilliseconds(500);
+    private const long PanSyncMinCenterDeltaHz = 10;
+    private static readonly TimeSpan PanSyncStabilityResendDelay = TimeSpan.FromMilliseconds(300);
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
 
@@ -321,22 +335,31 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
             _ = PublishSkimmerSpotAsync(spot);
         };
 
-        // Load persisted settings
-        CwSkimmerExePath = _settings.CwSkimmerExePath;
-        CwSkimmerIniPath = _settings.CwSkimmerIniPath;
-        TelnetCallsign = _settings.Callsign;
-        ConnectDelaySeconds = _settings.ConnectDelaySeconds;
-        LaunchDelaySeconds = _settings.LaunchDelaySeconds;
-        TelnetPortBase = _settings.TelnetPortBase;
-        TelnetClusterEnabled = _settings.TelnetClusterEnabled;
-        UpdateTelnetIniSummary();
-        SpotForwardingEnabled = _settings.SpotForwardingEnabled;
-        SpotLifetimeSeconds = _settings.SpotLifetimeSeconds;
-        SpotColor = _settings.SpotColor;
-        SpotBackgroundColor = _settings.SpotBackgroundColor;
-        UpdateSpotColorSelection(SpotColor);
-        UpdateSpotBackgroundColorSelection(SpotBackgroundColor);
+        // Load persisted settings without emitting user-facing change notices.
+        _isApplyingStartupSettings = true;
+        try
+        {
+            CwSkimmerExePath = _settings.CwSkimmerExePath;
+            CwSkimmerIniPath = _settings.CwSkimmerIniPath;
+            TelnetCallsign = _settings.Callsign;
+            ConnectDelaySeconds = _settings.ConnectDelaySeconds;
+            LaunchDelaySeconds = _settings.LaunchDelaySeconds;
+            TelnetPortBase = _settings.TelnetPortBase;
+            TelnetClusterEnabled = _settings.TelnetClusterEnabled;
+            UpdateTelnetIniSummary();
+            SpotForwardingEnabled = _settings.SpotForwardingEnabled;
+            SpotLifetimeSeconds = _settings.SpotLifetimeSeconds;
+            SpotColor = _settings.SpotColor;
+            SpotBackgroundColor = _settings.SpotBackgroundColor;
+            UpdateSpotColorSelection(SpotColor);
+            UpdateSpotBackgroundColorSelection(SpotBackgroundColor);
+        }
+        finally
+        {
+            _isApplyingStartupSettings = false;
+        }
 
+        UpdateLogsFolderSummary();
         AddStreamerStatus($"Release: {AppReleaseTag} | Commit: {AppCommitHash}");
         _discovery.Start();
     }
@@ -435,6 +458,12 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
                         cts.Dispose();
                     }
                     _sliceSyncCtsByChannel.Clear();
+                    foreach (var cts in _stabilityResendCtsByChannel.Values)
+                    {
+                        try { cts.Cancel(); } catch { }
+                        cts.Dispose();
+                    }
+                    _stabilityResendCtsByChannel.Clear();
                 }
                 _ritStatusEmitter.Clear();
                 AddStreamerStatus("Disconnected.");
@@ -481,28 +510,11 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         RefreshAllPanStreamSummaries();
         RefreshSliceSkimmerStates();
         RefreshCwSkimmerDeviceInfo(normalized.DAXIQChannel);
-
-        // Adaptive pan-center LO sync: only re-center CW Skimmer when pan center
-        // moves beyond half the stream sample-rate bandwidth.
-        if (TelnetClusterEnabled &&
-            IsCwSkimmerRunning &&
-            normalized.CenterFreqMHz > 0 &&
-            normalized.SampleRate > 0 &&
-            IsOwnStationPanChannel(normalized.DAXIQChannel))
-        {
-            var centerHz = (long)Math.Round(normalized.CenterFreqMHz * 1_000_000d);
-            var halfBandwidthHz = normalized.SampleRate / 2L;
-            var effectiveRxFreqHz = ResolveEffectiveRxFrequencyHzForChannel(normalized.DAXIQChannel);
-            if (ShouldResyncLoForPanCenterMove(
-                    normalized.DAXIQChannel,
-                    centerHz,
-                    halfBandwidthHz,
-                    effectiveRxFreqHz))
-            {
-                _ = _launcher.UpdateLoFreqAsync(normalized.DAXIQChannel, centerHz);
-                AddTelnetStatus($"Adaptive LO sync: ch {normalized.DAXIQChannel} center/edge context changed.");
-            }
-        }
+        TrySyncSkimmerForPanChange(
+            normalized.DAXIQChannel,
+            normalized.CenterFreqMHz,
+            normalized.SampleRate,
+            "DAX stream update");
     }
 
     private void RefreshCwSkimmerDeviceInfo(int daxIqChannel)
@@ -585,6 +597,13 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         LaunchCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         StopCwSkimmerForSliceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(VisibleClientGroups));
+
+        var sampleRate = DaxIQStreams.FirstOrDefault(s => s.DAXIQChannel == pan.DAXIQChannel)?.SampleRate ?? 48_000;
+        TrySyncSkimmerForPanChange(
+            pan.DAXIQChannel,
+            pan.CenterFreqMHz,
+            sampleRate,
+            "Panadapter update");
     }
 
     private void AddSlice(SliceInfo slice)
@@ -937,6 +956,23 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         HasStreamerIniFolder &&
         !string.IsNullOrWhiteSpace(StreamerIniFolderPath);
 
+    [RelayCommand(CanExecute = nameof(CanOpenLogsFolder))]
+    private void OpenLogsFolder()
+    {
+        if (!CanOpenLogsFolder())
+        {
+            UpdateLogsFolderSummary();
+            AddStreamerStatus("Logs folder not found yet.");
+            return;
+        }
+
+        TryOpenPath(LogsFolderPath, "open logs folder");
+    }
+
+    private bool CanOpenLogsFolder() =>
+        HasLogsFolder &&
+        !string.IsNullOrWhiteSpace(LogsFolderPath);
+
     private async Task PublishSkimmerSpotAsync(CwSkimmerSpotInfo spot)
     {
         if (!IsConnected || !SpotForwardingEnabled || spot.FrequencyKhz <= 0 || string.IsNullOrWhiteSpace(spot.Callsign))
@@ -1039,7 +1075,16 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     partial void OnSpotLifetimeSecondsChanged(int value)
     {
-        _settings.SpotLifetimeSeconds = Math.Max(30, value);
+        var normalized = Math.Max(30, value);
+        if (normalized != value)
+        {
+            SpotLifetimeSeconds = normalized;
+            return;
+        }
+
+        _settings.SpotLifetimeSeconds = normalized;
+        if (!_isApplyingStartupSettings)
+            AddStreamerStatus($"Spot persistence set to {normalized} seconds for next spots.");
     }
 
     partial void OnSpotColorChanged(string value)
@@ -1156,6 +1201,12 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SDRIQStreamer");
         return Path.Combine(appDataRoot, "artifacts", "logs", "spot-publish.log");
+    }
+
+    private static string ResolveLogsFolderPath()
+    {
+        var streamerLogPath = ResolveStreamerLogPath();
+        return Path.GetDirectoryName(streamerLogPath) ?? string.Empty;
     }
 
     private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
@@ -1277,6 +1328,14 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         StreamerIniCh2Path = string.Empty;
         HasStreamerIniCh2File = false;
         StreamerIniCh2PathText = "(not generated yet)";
+    }
+
+    private void UpdateLogsFolderSummary()
+    {
+        var logsDir = ResolveLogsFolderPath();
+        LogsFolderPath = logsDir;
+        LogsFolderPathText = string.IsNullOrWhiteSpace(logsDir) ? "(not available)" : logsDir;
+        HasLogsFolder = !string.IsNullOrWhiteSpace(logsDir) && Directory.Exists(logsDir);
     }
 
     private static bool TryResolveStreamerIniFiles(out IReadOnlyList<FileInfo> iniFiles)
@@ -1579,6 +1638,46 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         return next;
     }
 
+    private CancellationTokenSource ReplaceStabilityResendCts(int daxIqChannel)
+    {
+        var next = new CancellationTokenSource();
+        CancellationTokenSource? previous;
+
+        lock (_syncDampenGate)
+        {
+            _stabilityResendCtsByChannel.TryGetValue(daxIqChannel, out previous);
+            _stabilityResendCtsByChannel[daxIqChannel] = next;
+        }
+
+        if (previous is not null)
+        {
+            try { previous.Cancel(); } catch { }
+            previous.Dispose();
+        }
+
+        return next;
+    }
+
+    private void QueuePanSyncStabilityResend(int daxIqChannel, double freqMHz, string reason)
+    {
+        var cts = ReplaceStabilityResendCts(daxIqChannel);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(PanSyncStabilityResendDelay, cts.Token);
+                if (!TelnetClusterEnabled || !IsCwSkimmerRunning)
+                    return;
+
+                RecordOutboundQsy(daxIqChannel, freqMHz);
+                await _launcher.UpdateSliceFreqAsync(daxIqChannel, freqMHz);
+                UIPost(() => AddTelnetStatus(
+                    $"QSY stability resend ({reason}): ch {daxIqChannel} -> {freqMHz:F6} MHz."));
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
     private void RecordOutboundQsy(int daxIqChannel, double freqMHz)
     {
         lock (_syncDampenGate)
@@ -1810,28 +1909,45 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         return (long)Math.Round(effectiveRxMHz * 1_000_000d);
     }
 
-    private bool ShouldResyncLoForPanCenterMove(int channel, long centerHz, long halfBandwidthHz, long? effectiveRxFreqHz)
+    private void TrySyncSkimmerForPanChange(int daxIqChannel, double centerFreqMHz, int sampleRateHz, string reason)
     {
-        if (!_lastLoCenterHzByChannel.TryGetValue(channel, out var previousHz))
+        if (!TelnetClusterEnabled ||
+            !IsCwSkimmerRunning ||
+            daxIqChannel <= 0 ||
+            centerFreqMHz <= 0 ||
+            sampleRateHz <= 0 ||
+            !IsOwnStationPanChannel(daxIqChannel))
         {
-            _lastLoCenterHzByChannel[channel] = centerHz;
-            return false;
+            return;
         }
 
-        var centerDeltaHz = Math.Abs(centerHz - previousHz);
-        var strongCenterMove = centerDeltaHz > Math.Max(1, halfBandwidthHz);
-        var bandBucketChanged = GetBandBucketMHz(centerHz) != GetBandBucketMHz(previousHz);
+        var centerHz = (long)Math.Round(centerFreqMHz * 1_000_000d);
+        var hasPrevious = _lastLoCenterHzByChannel.TryGetValue(daxIqChannel, out var previousHz);
+        var centerDeltaHz = hasPrevious ? Math.Abs(centerHz - previousHz) : long.MaxValue;
+        if (hasPrevious && centerDeltaHz < PanSyncMinCenterDeltaHz)
+            return;
 
-        var edgeThresholdHz = Math.Max(1L, (long)Math.Round(halfBandwidthHz * 0.45d));
-        var nearEdge = effectiveRxFreqHz.HasValue &&
-                       Math.Abs(effectiveRxFreqHz.Value - centerHz) >= edgeThresholdHz;
-        var edgeDrivenMove = nearEdge && centerDeltaHz >= Math.Max(50L, halfBandwidthHz / 8L);
+        _lastLoCenterHzByChannel[daxIqChannel] = centerHz;
 
-        if (!strongCenterMove && !bandBucketChanged && !edgeDrivenMove)
-            return false;
+        var bandChangeText = hasPrevious && GetBandBucketMHz(centerHz) != GetBandBucketMHz(previousHz)
+            ? "band change"
+            : "pan move";
 
-        _lastLoCenterHzByChannel[channel] = centerHz;
-        return true;
+        _ = _launcher.UpdateLoFreqAsync(daxIqChannel, centerHz);
+
+        var effectiveRxFreqHz = ResolveEffectiveRxFrequencyHzForChannel(daxIqChannel);
+        if (!effectiveRxFreqHz.HasValue)
+        {
+            AddTelnetStatus(
+                $"LO sync ({reason}): ch {daxIqChannel} -> {centerHz} Hz ({bandChangeText}); slice frequency unavailable.");
+            return;
+        }
+
+        var effectiveRxFreqMHz = effectiveRxFreqHz.Value / 1_000_000d;
+        QueueSliceSync(daxIqChannel, effectiveRxFreqMHz);
+        QueuePanSyncStabilityResend(daxIqChannel, effectiveRxFreqMHz, reason);
+        AddTelnetStatus(
+            $"LO/QSY sync ({reason}): ch {daxIqChannel} {bandChangeText}, LO {centerHz} Hz, RX {effectiveRxFreqMHz:F6} MHz.");
     }
 
     private void EnsureSelectedControlStation()

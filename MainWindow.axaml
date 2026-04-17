@@ -28,6 +28,11 @@
                 <Setter Property="HorizontalContentAlignment" Value="Center"/>
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
             </Style>
+            <Style Selector="Button.action-button">
+                <Setter Property="Height" Value="22"/>
+                <Setter Property="FontSize" Value="10"/>
+                <Setter Property="Padding" Value="8,0"/>
+            </Style>
         </TabControl.Styles>
         <TabItem>
             <TabItem.Header>
@@ -45,19 +50,15 @@
                                    FontWeight="Bold"
                                    Foreground="{Binding ConnectTargetHeaderColor}"/>
                         <Button Grid.Column="1"
+                                Classes="action-button"
                                 Content="Connect"
                                 MinWidth="56"
-                                Height="20"
-                                FontSize="10"
-                                Padding="8,0"
                                 Command="{Binding ConnectCommand}"
                                 IsVisible="{Binding !IsConnected}"/>
                         <Button Grid.Column="1"
+                                Classes="action-button"
                                 Content="Disconnect"
                                 MinWidth="56"
-                                Height="20"
-                                FontSize="10"
-                                Padding="8,0"
                                 Command="{Binding DisconnectCommand}"
                                 IsVisible="{Binding IsConnected}"/>
                     </Grid>
@@ -113,20 +114,16 @@
                                                                                    FontSize="11"
                                                                                    VerticalAlignment="Center"/>
                                                                         <Button Grid.Column="1"
+                                                                                Classes="action-button"
                                                                                 Content="Start Skimmer"
                                                                                 MinWidth="96"
-                                                                                Height="20"
-                                                                                FontSize="10"
-                                                                                Padding="8,0"
                                                                                 Command="{Binding #Root.((local:MainWindowViewModel)DataContext).LaunchCwSkimmerForSliceCommand}"
                                                                                 CommandParameter="{Binding}"
                                                                                 IsVisible="{Binding !IsSkimmerRunning}"/>
                                                                         <Button Grid.Column="1"
+                                                                                Classes="action-button"
                                                                                 Content="Stop Skimmer"
                                                                                 MinWidth="96"
-                                                                                Height="20"
-                                                                                FontSize="10"
-                                                                                Padding="8,0"
                                                                                 Command="{Binding #Root.((local:MainWindowViewModel)DataContext).StopCwSkimmerForSliceCommand}"
                                                                                 CommandParameter="{Binding}"
                                                                                 IsVisible="{Binding IsSkimmerRunning}"/>
@@ -165,13 +162,11 @@
                             <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding NetworkMaxLatencyRttText}" FontSize="11" VerticalAlignment="Center"/>
 
                             <Button Grid.Row="0"
+                                    Classes="action-button"
                                     Grid.RowSpan="3"
                                     Grid.Column="2"
                                     Content="Reset Status"
                                     MinWidth="84"
-                                    Height="20"
-                                    FontSize="10"
-                                    Padding="8,0"
                                     Command="{Binding ResetNetworkStatusCommand}"
                                     IsEnabled="{Binding IsConnected}"
                                     VerticalAlignment="Center"/>
@@ -223,9 +218,9 @@
                                  Text="{Binding CwSkimmerExePath}"
                                  Watermark="Path to CwSkimmer.exe"/>
                         <Button Grid.Column="1"
+                                Classes="action-button"
                                 Content="Browse..."
-                                Width="70" Height="20"
-                                FontSize="9" Padding="6,0"
+                                Width="70"
                                 Click="OnBrowseCwSkimmer"/>
                     </Grid>
 
@@ -235,9 +230,9 @@
                                  Text="{Binding CwSkimmerIniPath}"
                                  Watermark="Path to cwskimmer.ini"/>
                         <Button Grid.Column="1"
+                                Classes="action-button"
                                 Content="Browse..."
-                                Width="70" Height="20"
-                                FontSize="9" Padding="6,0"
+                                Width="70"
                                 Click="OnBrowseCwSkimmerIni"/>
                     </Grid>
 
@@ -306,10 +301,8 @@
                                    Foreground="Gray"
                                    VerticalAlignment="Center"/>
                         <Button Grid.Column="1"
+                                Classes="action-button"
                                 Content="Open Folder"
-                                Height="22"
-                                FontSize="9"
-                                Padding="8,0"
                                 Command="{Binding OpenStreamerIniFolderCommand}"
                                 IsEnabled="{Binding HasStreamerIniFolder}"/>
                     </Grid>
@@ -334,10 +327,8 @@
                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
                                      VerticalContentAlignment="Center"/>
                             <Button Grid.Column="2"
+                                    Classes="action-button"
                                     Content="Open ch 1"
-                                    Height="22"
-                                    FontSize="9"
-                                    Padding="8,0"
                                     Command="{Binding OpenStreamerIniCh1FileCommand}"
                                     IsEnabled="{Binding HasStreamerIniCh1File}"/>
                         </Grid>
@@ -360,10 +351,8 @@
                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
                                      VerticalContentAlignment="Center"/>
                             <Button Grid.Column="2"
+                                    Classes="action-button"
                                     Content="Open ch 2"
-                                    Height="22"
-                                    FontSize="9"
-                                    Padding="8,0"
                                     Command="{Binding OpenStreamerIniCh2FileCommand}"
                                     IsEnabled="{Binding HasStreamerIniCh2File}"/>
                         </Grid>
@@ -376,9 +365,34 @@
             <TabItem.Header>
                 <TextBlock Text="Logs" FontSize="11" FontWeight="Bold"/>
             </TabItem.Header>
-            <Grid Margin="8" RowDefinitions="Auto,*" RowSpacing="6">
+            <Grid Margin="8" RowDefinitions="Auto,Auto,*" RowSpacing="6">
                 <TextBlock Grid.Row="0" Text="Streamer status" FontSize="11" FontWeight="SemiBold" Foreground="Gray"/>
-                <Border Grid.Row="1" BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="4">
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,0,0,2">
+                    <TextBlock Grid.Column="0"
+                               Text="Logs folder"
+                               Width="60"
+                               FontSize="10"
+                               Foreground="Gray"
+                               VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1"
+                             Text="{Binding LogsFolderPathText}"
+                             IsReadOnly="True"
+                             FontFamily="Consolas"
+                             FontSize="10"
+                             Foreground="DarkSlateGray"
+                             BorderThickness="1"
+                             BorderBrush="#E3E6EA"
+                             Background="Transparent"
+                             TextWrapping="NoWrap"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             VerticalContentAlignment="Center"/>
+                    <Button Grid.Column="2"
+                            Classes="action-button"
+                            Content="Open Folder"
+                            Command="{Binding OpenLogsFolderCommand}"
+                            IsEnabled="{Binding HasLogsFolder}"/>
+                </Grid>
+                <Border Grid.Row="2" BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="4">
                     <TextBox Text="{Binding FooterStatusText}"
                              IsReadOnly="True"
                              AcceptsReturn="True"
