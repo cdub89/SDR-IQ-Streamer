@@ -32,7 +32,7 @@ License: MIT (see `LICENSE`).
 - UI is organized into tabs:
   - `Operating`: radio target selection + stream/launch operations + live event line
   - `Config`: CW Skimmer paths + spot controls + Telnet INI view
-  - `Logs`: consolidated streamer status output
+  - `Logs`: consolidated streamer status output + quick open to logs folder
 
 ## 4) FlexRadio Integration Approach
 
@@ -115,13 +115,13 @@ SDR-IQ-Streamer/
 - Phase 1 (Foundation): COMPLETE
 - Phase 2.1 (CW config + INI write): COMPLETE
 - Phase 2.2 (CW launch): COMPLETE
-- Phase 2.3 (Runtime sync): COMPLETE (with adaptive pan-center LO re-sync refinement)
-- Phase 3 (Polish / hardening): IN PROGRESS
+- Phase 2.3 (Runtime sync): COMPLETE (including fine-tuned LO/panadapter/slice synchronization hardening)
+- Phase 3 (Polish / hardening): COMPLETE
 - Phase 3.1 (Bridge spots): COMPLETE baseline (forwarding, controls, diagnostics)
-- Phase 3.2 (RIT fine tuning sync): COMPLETE (baseline implemented, polish ongoing)
+- Phase 3.2 (RIT fine tuning sync): COMPLETE
 - Phase 3.3 (Network quality monitor): COMPLETE
-- Phase 3.4 (Configuration pages): IN PROGRESS
-- Phase 3.5 (Operating page simplification): ITERATIVE ACROSS PHASE 3
+- Phase 3.4 (Configuration pages): COMPLETE
+- Phase 3.5 (Operating page simplification): COMPLETE
 
 ## 10) Notes
 
