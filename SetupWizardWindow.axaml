@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="SDRIQStreamer.App.SetupWizardWindow"
+        Title="Set Up Wizard"
+        Width="700"
+        Height="720"
+        WindowStartupLocation="CenterScreen"
+        MinWidth="700"
+        MinHeight="500">
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top"
+                BorderBrush="#E3E6EA"
+                BorderThickness="0,0,0,1"
+                Padding="12,10">
+            <StackPanel Spacing="4">
+                <TextBlock x:Name="WizardTitleText"
+                           Text="Set Up Wizard"
+                           FontSize="18"
+                           FontWeight="SemiBold"/>
+                <TextBlock x:Name="WizardStepText"
+                           Text="Step 1 of 1"
+                           FontSize="11"
+                           Foreground="Gray"/>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom"
+                BorderBrush="#E3E6EA"
+                BorderThickness="0,1,0,0"
+                Padding="12,8">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
+                <Button x:Name="BackButton"
+                        Grid.Column="0"
+                        Content="Back"
+                        MinWidth="76"/>
+                <Button x:Name="NextButton"
+                        Grid.Column="1"
+                        Content="Next"
+                        MinWidth="76"/>
+                <TextBlock x:Name="WizardHintText"
+                           Grid.Column="3"
+                           FontSize="10"
+                           Foreground="Gray"
+                           VerticalAlignment="Center"
+                           Text="Content is loaded from SETUP_GUIDE_WIZARD.md"/>
+            </Grid>
+        </Border>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="ContentPanel" Margin="14" Spacing="8"/>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

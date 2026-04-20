@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -181,4 +183,59 @@ public partial class MainWindow : Window
         settings.MainWindowWidth = Bounds.Width;
         settings.MainWindowHeight = Bounds.Height;
     }
+
+    private void OnOpenSetupWizard(object? sender, RoutedEventArgs e)
+    {
+        var guidePath = ResolveSetupGuidePath();
+        var viewer = new SetupWizardWindow(guidePath);
+
+        if (VisualRoot is Window owner)
+            viewer.Show(owner);
+        else
+            viewer.Show();
+    }
+
+    private static string ResolveSetupGuidePath()
+    {
+        var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
+            ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+        if (repoRoot is null)
+            return string.Empty;
+
+        var guidePath = Path.Combine(repoRoot.FullName, "SETUP_GUIDE_WIZARD.md");
+        return File.Exists(guidePath) ? guidePath : string.Empty;
+    }
+
+    private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)
+    {
+        var current = start;
+        while (current is not null)
+        {
+            var projectFile = Path.Combine(current.FullName, "SmartSDRIQStreamer.csproj");
+            if (File.Exists(projectFile))
+                return current;
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    private void OnOpenSupport(object? sender, RoutedEventArgs e)
+    {
+        const string issuesUrl = "https://github.com/cdub89/SDR-IQ-Streamer/issues";
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = issuesUrl,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // Ignore browser launch failures to avoid disrupting app flow.
+        }
+    }
+
 }

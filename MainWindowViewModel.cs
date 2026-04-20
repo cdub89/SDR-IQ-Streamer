@@ -433,6 +433,8 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
             }
             else
             {
+                // Ensure all CW Skimmer instances are closed when the radio disconnects.
+                _launcher.Stop();
                 OwnClientStation = string.Empty;
                 OnPropertyChanged(nameof(OwnClientStation));
                 SetSelectedControlStation(string.Empty);

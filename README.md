@@ -132,3 +132,12 @@ SDR-IQ-Streamer/
 - Runtime artifacts:
   - `artifacts/cwskimmer/ini` for per-channel INI and diagnostics
   - `artifacts/logs` for runtime status logs
+
+## 11) Alpha.6 Validation Snapshot
+
+- Run start: `2026-04-16 20:15:23` (`Release: 0.1.0-alpha.6`, `Commit: 1260b434`).
+- Initial radio connect: `2026-04-16 20:15:36` to FLEX-6600.
+- Telnet startup recovered from one remote-close event (`20:16:10`) with reconnect at `20:16:23`.
+- Observed activity window: through at least `2026-04-17 06:53`.
+- Spot publish counts from captured logs: `10362` attempts, `10362` success, `0` failed.
+- Spot persistence usage confirmed in publish payloads with `lifetime_seconds=600`.

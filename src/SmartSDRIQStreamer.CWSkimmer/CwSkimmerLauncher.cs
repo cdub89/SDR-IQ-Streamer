@@ -25,7 +25,6 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     private readonly Dictionary<int, CancellationTokenSource> _telnetLifecycleCtsByChannel = new();
     private readonly Dictionary<int, int> _telnetPortByChannel = new();
     private readonly Dictionary<int, string> _managedIniPathByChannel = new();
-    private readonly Dictionary<int, CwSkimmerIniModel> _lastIniModelByChannel = new();
     private readonly List<Task> _backgroundTasks = new();
     private readonly object _sync = new();
     private readonly HashSet<int> _telnetDisconnectInFlightChannels = [];
@@ -111,14 +110,17 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         if (model.WdmSignalDevIndex < 0) return LaunchResult.DeviceNotFound;
 
         var iniPath = Path.Combine(IniDir, $"CwSkimmer-ch{daxIqChannel}.ini");
+        var channelIniExists = File.Exists(iniPath);
         if (!PrepareManagedIniFromTemplate(iniPath, config, out _))
             return LaunchResult.TemplateIniNotFound;
 
-        _iniWriter.Write(model, iniPath);
+        // Seed app-owned sections only on first creation; preserve user-managed
+        // channel INI values on subsequent launches.
+        if (!channelIniExists)
+            _iniWriter.Write(model, iniPath);
         lock (_sync)
         {
             _managedIniPathByChannel[daxIqChannel] = iniPath;
-            _lastIniModelByChannel[daxIqChannel] = model;
         }
         var resolvedTelnetPort = TryReadTelnetPortFromIni(iniPath) ?? config.TelnetPort;
         lock (_sync)
@@ -266,9 +268,6 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         }
 
         foreach (var channel in channels)
-            PersistManagedIniForChannel(channel);
-
-        foreach (var channel in channels)
         {
             CancelPendingTelnetWork(channel);
             BeginTelnetDisconnect(channel);
@@ -301,7 +300,6 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         if (proc is not null)
             TryStopProcessGracefully(proc);
 
-        PersistManagedIniForChannel(daxIqChannel);
         CancelPendingTelnetWork(daxIqChannel);
         BeginTelnetDisconnect(daxIqChannel);
 
@@ -533,7 +531,6 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
             _telnetPortByChannel.Remove(daxIqChannel);
             _managedIniPathByChannel.Remove(daxIqChannel);
-            _lastIniModelByChannel.Remove(daxIqChannel);
         }
 
         try
@@ -590,29 +587,6 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             return true;
 
         return false;
-    }
-
-    private void PersistManagedIniForChannel(int daxIqChannel)
-    {
-        string? path = null;
-        CwSkimmerIniModel? model = null;
-        lock (_sync)
-        {
-            _managedIniPathByChannel.TryGetValue(daxIqChannel, out path);
-            _lastIniModelByChannel.TryGetValue(daxIqChannel, out model);
-        }
-
-        if (string.IsNullOrWhiteSpace(path) || model is null)
-            return;
-
-        try
-        {
-            _iniWriter.Write(model, path);
-        }
-        catch (Exception ex)
-        {
-            LogNonFatal($"Failed to persist managed INI for channel {daxIqChannel}.", ex);
-        }
     }
 
     private static void TryStopProcessGracefully(Process proc)
