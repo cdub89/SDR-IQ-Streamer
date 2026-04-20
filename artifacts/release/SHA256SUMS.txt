@@ -4,3 +4,4 @@ c244af5444b1aba5e8848a87346789d605a1e5ebda4ee8c5aecfd9f13eb269ba  SDRIQStreamer-
 0bd1c7198b992b246a903e4d0f6b979717e76282ff11f4a296eec173bcb65fcb  SDRIQStreamer-v.0.1.0-alpha.5-win-x64.zip
 964b305b24eeceaa5db6e3093a8fa3455b97a14608bd0a08e93a5b58ca515fa7  SDRIQStreamer-v.0.1.0-alpha.6-win-x64.zip
 b5a348ba5355d79546aa53903b5f40ea88eca7c1eeacfb8c18e960963a8cf36f  SDRIQStreamer-v0.1.7b-win-x64.zip
+1bd7a232128f65cd85a74348f6821cfa0f38676e56dc8ed734074ac407dc87ba  SDRIQStreamer-v0.1.8b-win-x64.zip

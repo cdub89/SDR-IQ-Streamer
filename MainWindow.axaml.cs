@@ -197,6 +197,10 @@ public partial class MainWindow : Window
 
     private static string ResolveSetupGuidePath()
     {
+        var deployedPath = Path.Combine(AppContext.BaseDirectory, "SETUP_GUIDE_WIZARD.md");
+        if (File.Exists(deployedPath))
+            return deployedPath;
+
         var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
             ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
         if (repoRoot is null)
