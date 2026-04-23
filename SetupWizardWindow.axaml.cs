@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using Avalonia;
@@ -9,13 +9,15 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace SDRIQStreamer.App;
 
 public partial class SetupWizardWindow : Window
 {
+    private const string EmbeddedGuideResourceName = "SDRIQStreamer.App.SETUP_GUIDE_WIZARD.md";
+    private static readonly string ResourceAssemblyName = typeof(SetupWizardWindow).Assembly.GetName().Name ?? "SDRIQStreamer";
     private readonly IReadOnlyList<WizardPage> _pages;
-    private readonly string _guideDirectory;
     private int _currentIndex;
 
     private readonly TextBlock _wizardTitleText;
@@ -25,7 +27,7 @@ public partial class SetupWizardWindow : Window
     private readonly Button _backButton;
     private readonly Button _nextButton;
 
-    public SetupWizardWindow(string guidePath)
+    public SetupWizardWindow()
     {
         InitializeComponent();
 
@@ -39,17 +41,16 @@ public partial class SetupWizardWindow : Window
         _backButton.Click += OnBackClicked;
         _nextButton.Click += OnNextClicked;
 
-        if (!string.IsNullOrWhiteSpace(guidePath) && File.Exists(guidePath))
+        var markdown = TryLoadEmbeddedGuideMarkdown();
+        if (!string.IsNullOrWhiteSpace(markdown))
         {
-            _guideDirectory = Path.GetDirectoryName(guidePath) ?? string.Empty;
-            _pages = ParseWizardPages(File.ReadAllText(guidePath));
-            _wizardHintText.Text = $"Loaded: {Path.GetFileName(guidePath)}";
+            _pages = ParseWizardPages(markdown);
+            _wizardHintText.Text = "Loaded from bundled setup guide.";
         }
         else
         {
-            _guideDirectory = string.Empty;
-            _pages = [new WizardPage("Setup guide not found", "Expected file: SETUP_GUIDE_WIZARD.md")];
-            _wizardHintText.Text = "Guide file is missing.";
+            _pages = [new WizardPage("Setup guide not found", "Embedded setup guide resource is missing.")];
+            _wizardHintText.Text = "Bundled guide is missing.";
         }
 
         RenderCurrentPage();
@@ -94,7 +95,18 @@ public partial class SetupWizardWindow : Window
         _nextButton.Content = _currentIndex < _pages.Count - 1 ? "Next" : "Done";
 
         _contentPanel.Children.Clear();
-        BuildFormattedContent(page.Body, _contentPanel, _guideDirectory);
+        BuildFormattedContent(page.Body, _contentPanel);
+    }
+
+    private static string TryLoadEmbeddedGuideMarkdown()
+    {
+        var assembly = typeof(SetupWizardWindow).Assembly;
+        using var stream = assembly.GetManifestResourceStream(EmbeddedGuideResourceName);
+        if (stream is null)
+            return string.Empty;
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static IReadOnlyList<WizardPage> ParseWizardPages(string markdown)
@@ -130,7 +142,7 @@ public partial class SetupWizardWindow : Window
         return [new WizardPage("Setup Guide", markdown)];
     }
 
-    private static void BuildFormattedContent(string content, Panel target, string guideDirectory)
+    private static void BuildFormattedContent(string content, Panel target)
     {
         var lines = content.Replace("\r\n", "\n").Split('\n');
         var inCodeBlock = false;
@@ -173,7 +185,7 @@ public partial class SetupWizardWindow : Window
                 continue;
             }
 
-            if (TryAddImage(target, line, guideDirectory))
+            if (TryAddImage(target, line))
                 continue;
 
             if (TryAddExternalLink(target, line))
@@ -291,21 +303,19 @@ public partial class SetupWizardWindow : Window
         });
     }
 
-    private static bool TryAddImage(Panel target, string line, string guideDirectory)
+    private static bool TryAddImage(Panel target, string line)
     {
         var match = Regex.Match(line, @"^!\[(?<alt>[^\]]*)\]\((?<path>[^)]+)\)$");
         if (!match.Success)
             return false;
 
         var alt = match.Groups["alt"].Value.Trim();
-        var relativePath = match.Groups["path"].Value.Trim();
-        var imagePath = ResolveImagePath(relativePath, guideDirectory);
-
-        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+        var imageReference = match.Groups["path"].Value.Trim();
+        if (!TryOpenImageStream(imageReference, out var imageStream))
         {
             target.Children.Add(new TextBlock
             {
-                Text = $"[Image not found] {relativePath}",
+                Text = $"[Image not found] {imageReference}",
                 Foreground = Brushes.DarkOrange,
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap
@@ -315,15 +325,18 @@ public partial class SetupWizardWindow : Window
 
         try
         {
-            using var fs = File.OpenRead(imagePath);
-            var bitmap = new Bitmap(fs);
-            target.Children.Add(new Image
+            using (imageStream)
             {
-                Source = bitmap,
-                Stretch = Stretch.Uniform,
-                MaxHeight = 420,
-                Margin = new Thickness(0, 6, 0, 4)
-            });
+                var bitmap = new Bitmap(imageStream);
+                target.Children.Add(new Image
+                {
+                    Source = bitmap,
+                    Stretch = Stretch.Uniform,
+                    MaxHeight = 420,
+                    Margin = new Thickness(0, 6, 0, 4)
+                });
+            }
+
             if (!string.IsNullOrWhiteSpace(alt))
             {
                 target.Children.Add(new TextBlock
@@ -340,7 +353,7 @@ public partial class SetupWizardWindow : Window
         {
             target.Children.Add(new TextBlock
             {
-                Text = $"[Image load failed] {relativePath}",
+                Text = $"[Image load failed] {imageReference}",
                 Foreground = Brushes.DarkOrange,
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap
@@ -350,15 +363,42 @@ public partial class SetupWizardWindow : Window
         return true;
     }
 
-    private static string ResolveImagePath(string value, string guideDirectory)
+    private static bool TryOpenImageStream(string reference, out Stream stream)
     {
-        if (Path.IsPathRooted(value))
-            return value;
+        stream = Stream.Null;
+        if (string.IsNullOrWhiteSpace(reference))
+            return false;
 
-        if (string.IsNullOrWhiteSpace(guideDirectory))
-            return string.Empty;
+        var normalized = reference.Trim().Replace('\\', '/');
 
-        return Path.GetFullPath(Path.Combine(guideDirectory, value));
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.Scheme.Equals("avares", StringComparison.OrdinalIgnoreCase) &&
+                AssetLoader.Exists(absoluteUri))
+            {
+                stream = AssetLoader.Open(absoluteUri);
+                return true;
+            }
+
+            if (absoluteUri.IsFile && File.Exists(absoluteUri.LocalPath))
+            {
+                stream = File.OpenRead(absoluteUri.LocalPath);
+                return true;
+            }
+        }
+
+        if (Path.IsPathRooted(reference) && File.Exists(reference))
+        {
+            stream = File.OpenRead(reference);
+            return true;
+        }
+
+        var appResourceUri = new Uri($"avares://{ResourceAssemblyName}/{normalized.TrimStart('/')}");
+        if (!AssetLoader.Exists(appResourceUri))
+            return false;
+
+        stream = AssetLoader.Open(appResourceUri);
+        return true;
     }
 
     private sealed record WizardPage(string Title, string Body);

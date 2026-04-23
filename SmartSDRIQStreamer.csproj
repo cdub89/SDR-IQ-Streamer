@@ -3,12 +3,13 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
-    <Version>0.1.8-b</Version>
+    <Version>0.1.9-b</Version>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
     <FileVersion>0.1.0.0</FileVersion>
     <AssemblyName>SDRIQStreamer</AssemblyName>
     <RootNamespace>SDRIQStreamer.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\SetupWizard\StreamerApp_variant.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
   <ItemGroup>
@@ -37,9 +38,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="SETUP_GUIDE_WIZARD.md">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </None>
+    <EmbeddedResource Include="SETUP_GUIDE_WIZARD.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\SetupWizard\**\*.png" />
   </ItemGroup>
 </Project>

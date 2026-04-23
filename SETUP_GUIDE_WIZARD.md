@@ -23,6 +23,8 @@ If any item above is missing, stop and fix that first. Common issues include:
   - [https://www.flexradio.com/ssdr/](https://www.flexradio.com/ssdr/)
   - [https://www.dxatlas.com/CwSkimmer/](https://www.dxatlas.com/CwSkimmer/)
 
+![Streamer App](Assets/SetupWizard/StreamerApp.png)
+
 ---
 
 ## Step 1 - Prepare CW Skimmer Master INI (Standalone First)
@@ -71,7 +73,7 @@ Use this section while running CW Skimmer standalone.
 - LO Frequency (Hz) should match the center frequency of the active IQ stream.
 - CW Pitch should match the pitch configured in SmartSDR.
 
-![CW Skimmer Radio tab example](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-8d3c7eef-09f5-4652-8c05-93bf3fe4a9bd.png)
+![CW Skimmer Radio tab example](Assets/SetupWizard/image-8d3c7eef-09f5-4652-8c05-93bf3fe4a9bd.png)
 
 ### Audio tab
 
@@ -81,7 +83,7 @@ Use this section while running CW Skimmer standalone.
 
 - Confirm input levels are active and stable (not clipping, not flatline).
 - Verify sample-rate-related behavior is stable for your normal channels.
-![CW Skimmer Audio tab example](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-6c01eddc-e2e5-46dd-a904-1cae43587776.png)
+![CW Skimmer Audio tab example](Assets/SetupWizard/image-6c01eddc-e2e5-46dd-a904-1cae43587776.png)
 
 ### Operator tab
 
@@ -93,7 +95,7 @@ Use this section while running CW Skimmer standalone.
 - Confirm telnet/network settings are valid for local operation.
 - Ensure port configuration does not conflict with other local services.
 - Validate settings persist after save and restart.
-![CW Skimmer Network tab example](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-6013668c-9a3b-4a87-a15d-5e9acfd2b129.png)
+![CW Skimmer Network tab example](Assets/SetupWizard/image-6013668c-9a3b-4a87-a15d-5e9acfd2b129.png)
 
 After all tab settings are validated, save, set the CW Skimmer window size and position, then close CW Skimmer normally.
 
@@ -116,7 +118,7 @@ Spot persistence and colors:
 - Validate by publishing at least one known spot and confirming appearance in SmartSDR panadapter.
 
 Streamer Config example:
-![Streamer Config tab example](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-f6601ad8-b7e1-485c-93aa-e2e9f46f62a8.png)
+![Streamer Config tab example](Assets/SetupWizard/image-f6601ad8-b7e1-485c-93aa-e2e9f46f62a8.png)
 
 ---
 
@@ -128,7 +130,7 @@ Streamer Config example:
 4. Confirm DAX-IQ context is available for intended channels.
 
 Operating tab connected example:
-![Operating tab connect example](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-28013ef7-a67d-4c10-a6f4-02147c7584cd.png)
+![Operating tab connect example](Assets/SetupWizard/image-28013ef7-a67d-4c10-a6f4-02147c7584cd.png)
 
 If connect fails, resolve radio/network/discovery issues before continuing.
 
@@ -148,7 +150,7 @@ Normal flow:
 3. Verify decode activity and expected frequency behavior.
 
 Operating tab while skimming example:
-![Connected operating view example](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-5c26a00e-a128-4871-a1b8-7ac7a88e4355.png)
+![Connected operating view example](Assets/SetupWizard/image-5c26a00e-a128-4871-a1b8-7ac7a88e4355.png)
 
 To stop from streamer:
 
@@ -208,7 +210,7 @@ Artifacts and logs reference:
 - Device diagnostic log: `artifacts/cwskimmer/ini/device-diagnostic.txt`
 
 Example of healthy connected operating state during validation:
-![Operating view with active skimmer](C:\Users\chris\.cursor\projects\c-Users-chris-github-SmartSDR-IQ-Streamer\assets\c__Users_chris_AppData_Roaming_Cursor_User_workspaceStorage_1b7ed97cb7b62fabb106c9e5033144cd_images_image-4966f52d-3ccc-4ecf-b274-2fe2c1a79fd6.png)
+![Operating view with active skimmer](Assets/SetupWizard/image-4966f52d-3ccc-4ecf-b274-2fe2c1a79fd6.png)
 
 Recommended first-time validation run:
 

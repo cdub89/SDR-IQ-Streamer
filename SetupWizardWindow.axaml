@@ -45,7 +45,7 @@
                            FontSize="10"
                            Foreground="Gray"
                            VerticalAlignment="Center"
-                           Text="Content is loaded from SETUP_GUIDE_WIZARD.md"/>
+                           Text="Content is loaded from bundled setup guide"/>
             </Grid>
         </Border>
 
