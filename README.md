@@ -82,6 +82,14 @@ dotnet build -c Release
 .\bin\Release\net8.0-windows\SDRIQStreamer.exe
 ```
 
+### Release Packaging
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\publish-release.ps1 -Configuration Release -Runtime win-x64
+```
+
+- Publish GitHub releases with attached binaries (`SDRIQStreamer-v<version>-win-x64.zip`) and checksum asset (`SHA256SUMS.txt`).
+
 ### Tests
 
 ```powershell
