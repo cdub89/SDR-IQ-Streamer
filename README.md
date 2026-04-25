@@ -3,7 +3,7 @@
 Modernizes CW Skimmer integration with FlexRadio DAX-IQ streams using a dedicated Avalonia desktop app.
 License: MIT (see `LICENSE`).
 
-<img width="416" height="389" alt="image" src="https://github.com/user-attachments/assets/513f0fc2-b1c8-4748-8dc3-26dd06373612" />
+<img width="620" alt="SDR-IQ-Streamer operating view" src="Assets/README/operating-screenshot-v0.1.9b.png" />
 
 
 ## 1) Quick Start

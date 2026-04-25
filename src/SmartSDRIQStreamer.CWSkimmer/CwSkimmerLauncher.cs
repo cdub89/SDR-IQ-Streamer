@@ -25,6 +25,8 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     private readonly Dictionary<int, CancellationTokenSource> _telnetLifecycleCtsByChannel = new();
     private readonly Dictionary<int, int> _telnetPortByChannel = new();
     private readonly Dictionary<int, string> _managedIniPathByChannel = new();
+    private readonly Dictionary<int, DateTime> _processStartUtcByChannel = new();
+    private readonly Dictionary<int, string> _requestedStopReasonByChannel = new();
     private readonly List<Task> _backgroundTasks = new();
     private readonly object _sync = new();
     private readonly HashSet<int> _telnetDisconnectInFlightChannels = [];
@@ -146,9 +148,13 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         if (process is null) return LaunchResult.ProcessStartFailed;
 
         process.EnableRaisingEvents = true;
-        process.Exited += (_, _) => OnProcessExited(daxIqChannel);
+        process.Exited += (_, _) => OnProcessExited(daxIqChannel, process);
         lock (_sync)
+        {
             _processesByChannel[daxIqChannel] = process;
+            _processStartUtcByChannel[daxIqChannel] = DateTime.UtcNow;
+            _requestedStopReasonByChannel.Remove(daxIqChannel);
+        }
         EmitRunningStateChangedIfNeeded(true);
 
         // Connect telnet in the background after CW Skimmer has started up,
@@ -177,7 +183,11 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         if (config.ConnectDelaySeconds > 0)
             await Task.Delay(TimeSpan.FromSeconds(config.ConnectDelaySeconds), ct);
 
-        if (!IsChannelRunning(daxIqChannel)) return;
+        if (!IsChannelRunning(daxIqChannel))
+        {
+            EmitLauncherStatus(daxIqChannel, "Skipping telnet connect because CW Skimmer process is not running.");
+            return;
+        }
 
         const int maxConnectAttempts = 3;
         var retryDelays = new[]
@@ -260,6 +270,8 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             channels = _processesByChannel.Keys.ToList();
             procs = _processesByChannel.Values.ToList();
             _processesByChannel.Clear();
+            foreach (var channel in channels)
+                _requestedStopReasonByChannel[channel] = "stop requested by application (all channels).";
         }
 
         foreach (var proc in procs)
@@ -295,6 +307,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                 proc = p;
                 _processesByChannel.Remove(daxIqChannel);
             }
+            _requestedStopReasonByChannel[daxIqChannel] = "stop requested by application (single channel).";
         }
 
         if (proc is not null)
@@ -306,10 +319,47 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         EmitRunningStateChangedIfNeeded(IsRunning);
     }
 
-    private void OnProcessExited(int daxIqChannel)
+    private void OnProcessExited(int daxIqChannel, Process process)
     {
+        DateTime? startUtc = null;
+        string requestedStopReason = string.Empty;
+        int? exitCode = null;
+        try
+        {
+            if (process.HasExited)
+                exitCode = process.ExitCode;
+        }
+        catch
+        {
+            // Ignore metadata fetch failures for exited process.
+        }
+
         lock (_sync)
+        {
             _processesByChannel.Remove(daxIqChannel);
+            if (_processStartUtcByChannel.TryGetValue(daxIqChannel, out var started))
+            {
+                startUtc = started;
+                _processStartUtcByChannel.Remove(daxIqChannel);
+            }
+            if (_requestedStopReasonByChannel.TryGetValue(daxIqChannel, out var reason))
+            {
+                requestedStopReason = reason;
+                _requestedStopReasonByChannel.Remove(daxIqChannel);
+            }
+        }
+
+        var uptime = startUtc.HasValue
+            ? DateTime.UtcNow - startUtc.Value
+            : (TimeSpan?)null;
+        var reasonText = string.IsNullOrWhiteSpace(requestedStopReason)
+            ? "process exited without app stop request."
+            : requestedStopReason;
+        var exitCodeText = exitCode.HasValue ? exitCode.Value.ToString(CultureInfo.InvariantCulture) : "unknown";
+        var uptimeText = uptime.HasValue ? $"{uptime.Value.TotalSeconds:F1}s" : "unknown";
+        EmitLauncherStatus(
+            daxIqChannel,
+            $"CW Skimmer process exited (exit_code={exitCodeText}, uptime={uptimeText}, reason={reasonText})");
 
         CancelPendingTelnetWork(daxIqChannel);
         BeginTelnetDisconnect(daxIqChannel);
@@ -446,6 +496,10 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             telnet.SpotReceived += spot => SpotReceived?.Invoke(daxIqChannel, spot);
             telnet.StatusChanged += message =>
             {
+                if (message.Contains("Telnet connection closed by CW Skimmer.", StringComparison.OrdinalIgnoreCase))
+                {
+                    message = $"{message} (process_running={IsChannelRunning(daxIqChannel)})";
+                }
                 var portText = TryGetKnownTelnetPortText(daxIqChannel);
                 TelnetStatusChanged?.Invoke($"ch {daxIqChannel}{portText}: {message}");
             };
@@ -587,6 +641,12 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             return true;
 
         return false;
+    }
+
+    private void EmitLauncherStatus(int daxIqChannel, string message)
+    {
+        var portText = TryGetKnownTelnetPortText(daxIqChannel);
+        TelnetStatusChanged?.Invoke($"ch {daxIqChannel}{portText}: {message}");
     }
 
     private static void TryStopProcessGracefully(Process proc)

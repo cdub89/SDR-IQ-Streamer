@@ -350,9 +350,11 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             return;
         }
 
-        if (line.Contains("Clicked on", StringComparison.OrdinalIgnoreCase) ||
-            line.Contains("SKIMMER/", StringComparison.OrdinalIgnoreCase) ||
-            line.TrimStart().StartsWith("DX de ", StringComparison.OrdinalIgnoreCase))
+        var isEmptyClickEcho = line.Contains("Clicked on \"\"", StringComparison.OrdinalIgnoreCase);
+        if (!isEmptyClickEcho &&
+            (line.Contains("Clicked on", StringComparison.OrdinalIgnoreCase) ||
+             line.Contains("SKIMMER/", StringComparison.OrdinalIgnoreCase) ||
+             line.TrimStart().StartsWith("DX de ", StringComparison.OrdinalIgnoreCase)))
         {
             LogDiag($"RX {line}");
         }
