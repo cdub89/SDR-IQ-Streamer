@@ -15,6 +15,7 @@ public sealed class AppServices
     public IRadioConnection Connection { get; }
     public IAudioDeviceFinder DeviceFinder { get; }
     public ICwSkimmerLauncher Launcher { get; }
+    public IReleaseUpdateService ReleaseUpdateService { get; }
 
     public AppServices()
     {
@@ -23,6 +24,7 @@ public sealed class AppServices
         Discovery = new FlexLibRadioDiscovery();
         Connection = new FlexLibRadioConnection();
         DeviceFinder = new WdmAudioDeviceFinder();
+        ReleaseUpdateService = new ReleaseUpdateService();
 
         var modelFactory = new CwSkimmerIniModelFactory(DeviceFinder);
         var iniWriter = new CwSkimmerIniWriter();
@@ -30,5 +32,5 @@ public sealed class AppServices
     }
 
     public MainWindowViewModel CreateMainWindowViewModel()
-        => new(Discovery, Connection, Launcher, SettingsSession);
+        => new(Discovery, Connection, Launcher, SettingsSession, ReleaseUpdateService);
 }

@@ -27,6 +27,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly FooterStatusBuffer _footerStatusBuffer;
     private readonly CwSkimmerWorkflowService _cwSkimmerWorkflow;
+    private readonly IReleaseUpdateService _releaseUpdateService;
 private static readonly (string ReleaseTag, string CommitHash, string Display, string BuildDate) s_appBuildInfo =
         ResolveAppBuildInfo();
 
@@ -192,6 +193,10 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _sliceSyncCtsByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _stabilityResendCtsByChannel = new();
+    private readonly CancellationTokenSource _updateCheckLoopCts = new();
+    private readonly SemaphoreSlim _updateCheckLock = new(1, 1);
+    private Task? _updateCheckLoopTask;
+    private string _lastAnnouncedUpdateTag = string.Empty;
     private readonly object _syncDampenGate = new();
     private readonly ThrottledStatusEmitter _ritStatusEmitter;
     private readonly Dictionary<string, (bool RitEnabled, double RitOffsetHz)> _lastRitStateBySlice = new();
@@ -213,11 +218,26 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     [ObservableProperty]
     private string _latestFooterEvent = string.Empty;
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenLatestReleaseCommand))]
+    private bool _isUpdateAvailable;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenLatestReleaseCommand))]
+    private string _latestReleaseUrl = string.Empty;
+
+    [ObservableProperty]
+    private string _latestAvailableTag = string.Empty;
+
+    [ObservableProperty]
+    private string _updateStatusText = "Not checked yet.";
+
     public string AppReleaseTag => s_appBuildInfo.ReleaseTag;
     public string AppReleaseDisplay => FormatReleaseForHelp(AppReleaseTag);
     public string AppCommitHash => s_appBuildInfo.CommitHash;
     public string AppBuildDisplay => s_appBuildInfo.Display;
     public string AppBuildDate => s_appBuildInfo.BuildDate;
+    private string AppReleaseTagForUpdateChecks => ResolveReleaseTagForUpdateChecks();
     public string WindowTitle => $"SDR-IQ-Streamer {AppBuildDisplay}";
     public string ConnectTargetHeaderColor => IsConnected ? "Green" : "Gray";
     public string ConnectTargetHeaderText
@@ -245,13 +265,15 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public MainWindowViewModel(IRadioDiscovery discovery, IRadioConnection connection,
-                               ICwSkimmerLauncher launcher, AppSettingsSession settingsSession)
+                               ICwSkimmerLauncher launcher, AppSettingsSession settingsSession,
+                               IReleaseUpdateService releaseUpdateService)
     {
         _discovery     = discovery;
         _connection    = connection;
         _launcher      = launcher;
         _settingsSession = settingsSession;
         _settings = _settingsSession.Settings;
+        _releaseUpdateService = releaseUpdateService;
         _footerStatusBuffer = new FooterStatusBuffer(FooterStatusLines);
         _ritStatusEmitter = new ThrottledStatusEmitter(RitStatusMinInterval, UIPost, AddTelnetStatus);
         _cwSkimmerWorkflow = new CwSkimmerWorkflowService(_connection, _launcher, _settings);
@@ -361,6 +383,7 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
         UpdateLogsFolderSummary();
         AddStreamerStatus($"Release: {AppReleaseTag} | Commit: {AppCommitHash}");
+        StartUpdateChecks();
         _discovery.Start();
     }
 
@@ -843,6 +866,24 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     private bool CanResetNetworkStatus() => IsConnected;
 
+    [RelayCommand]
+    private async Task CheckForUpdatesAsync()
+    {
+        await CheckForUpdatesCoreAsync("manual", _updateCheckLoopCts.Token);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanOpenLatestRelease))]
+    private void OpenLatestRelease()
+    {
+        if (!CanOpenLatestRelease())
+            return;
+
+        TryOpenPath(LatestReleaseUrl, "open latest release page");
+    }
+
+    private bool CanOpenLatestRelease() =>
+        IsUpdateAvailable && !string.IsNullOrWhiteSpace(LatestReleaseUrl);
+
     private DaxIQStreamInfo? ResolveSliceLaunchStream(SliceViewModel? sliceVm)
     {
         if (sliceVm is null)
@@ -1022,13 +1063,90 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         }
     }
 
+    private void StartUpdateChecks()
+    {
+        _ = Task.Run(() => CheckForUpdatesCoreAsync("startup", _updateCheckLoopCts.Token));
+
+        if (!_settings.UpdateAutoCheckEnabled)
+            return;
+
+        _updateCheckLoopTask = Task.Run(async () =>
+        {
+            try
+            {
+                var intervalMinutes = Math.Max(5, _settings.UpdateCheckIntervalMinutes);
+                using var timer = new PeriodicTimer(TimeSpan.FromMinutes(intervalMinutes));
+
+                while (await timer.WaitForNextTickAsync(_updateCheckLoopCts.Token))
+                    await CheckForUpdatesCoreAsync("automatic", _updateCheckLoopCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown path.
+            }
+        });
+    }
+
+    private async Task CheckForUpdatesCoreAsync(string source, CancellationToken ct)
+    {
+        if (!await _updateCheckLock.WaitAsync(0, ct))
+            return;
+
+        try
+        {
+            var result = await _releaseUpdateService.CheckForUpdateAsync(AppReleaseTagForUpdateChecks, ct);
+            _settings.UpdateLastCheckedUtc = DateTime.UtcNow;
+
+            UIPost(() =>
+            {
+                UpdateStatusText = result.StatusMessage;
+
+                if (!result.Succeeded)
+                {
+                    if (string.Equals(source, "manual", StringComparison.OrdinalIgnoreCase))
+                        AddStreamerStatus($"Update check failed: {result.StatusMessage}");
+                    return;
+                }
+
+                IsUpdateAvailable = result.IsUpdateAvailable;
+                LatestAvailableTag = result.LatestTag;
+                LatestReleaseUrl = result.LatestReleaseUrl;
+
+                if (result.IsUpdateAvailable &&
+                    !string.Equals(_lastAnnouncedUpdateTag, result.LatestTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    _lastAnnouncedUpdateTag = result.LatestTag;
+                    AddStreamerStatus($"Update available: {result.LatestTag}. Open Help tab for details.");
+                }
+                else if (!result.IsUpdateAvailable &&
+                         string.Equals(source, "manual", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddStreamerStatus($"No update found. {result.StatusMessage}");
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal cancellation path.
+        }
+        finally
+        {
+            _updateCheckLock.Release();
+        }
+    }
+
     // ── Shutdown ──────────────────────────────────────────────────────────────
 
     public void Shutdown()
     {
+        _updateCheckLoopCts.Cancel();
+        try { _updateCheckLoopTask?.Wait(TimeSpan.FromSeconds(1)); } catch { }
+
         if (IsCwSkimmerRunning) _launcher.Stop();
         if (IsConnected) _connection.Disconnect();
         _ritStatusEmitter.Dispose();
+        _updateCheckLock.Dispose();
+        _updateCheckLoopCts.Dispose();
         _discovery.Stop();
     }
 
@@ -1578,6 +1696,18 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         }
 
         return "--";
+    }
+
+    private string ResolveReleaseTagForUpdateChecks()
+    {
+        var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
+        var informationalVersion =
+            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var assemblyVersion = ExtractVersion(informationalVersion);
+        if (!string.IsNullOrWhiteSpace(assemblyVersion))
+            return NormalizeVersionDisplayTag(assemblyVersion);
+
+        return AppReleaseTag;
     }
 
     private string ResolveConnectedRadioDisplayName()

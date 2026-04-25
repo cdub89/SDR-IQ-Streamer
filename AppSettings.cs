@@ -1,3 +1,5 @@
+using System;
+
 namespace SDRIQStreamer.App;
 
 /// <summary>
@@ -27,6 +29,12 @@ public sealed class AppSettings
     public int SpotLifetimeSeconds { get; set; } = 300;
     public string SpotColor { get; set; } = "#FF00FFFF";
     public string SpotBackgroundColor { get; set; } = "#00000000";
+
+    // ── Update checks ──────────────────────────────────────────────────────────
+
+    public bool UpdateAutoCheckEnabled { get; set; } = true;
+    public int UpdateCheckIntervalMinutes { get; set; } = 30;
+    public DateTime? UpdateLastCheckedUtc { get; set; }
 
     // ── Main window placement ─────────────────────────────────────────────────
 

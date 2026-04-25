@@ -23,6 +23,7 @@ namespace SDRIQStreamer.CWSkimmer;
 /// </summary>
 public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
 {
+    private static readonly TimeSpan s_duplicateQsySuppressWindow = TimeSpan.FromMilliseconds(400);
     private static readonly string s_diagPath = ResolveDiagPath();
     private static readonly Channel<string> s_diagChannel = Channel.CreateUnbounded<string>(
         new UnboundedChannelOptions
@@ -43,6 +44,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
     private DateTime                _lastQsySyncStatusUtc;
     private DateTime                _lastQsyStatusEmitUtc;
     private double?                 _lastQsyStatusFreqMHz;
+    private DateTime                _lastQsyCommandUtc;
+    private decimal?                _lastQsyCommandKhz;
     private volatile bool           _isSessionReady;
     private int                     _disconnectInProgress;
 
@@ -66,6 +69,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             _lastQsyStatusFreqMHz = null;
             _lastQsySyncStatusUtc = default;
             _lastQsyStatusEmitUtc = default;
+            _lastQsyCommandKhz = null;
+            _lastQsyCommandUtc = default;
             _tcp    = new TcpClient();
             await _tcp.ConnectAsync(host, port, ct);
             _stream = _tcp.GetStream();
@@ -137,10 +142,22 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         await _writeLock.WaitAsync(ct);
         try
         {
+            var normalizedKhz = Math.Round((decimal)freqKhz, 3, MidpointRounding.AwayFromZero);
+            var now = DateTime.UtcNow;
+            if (_lastQsyCommandKhz.HasValue &&
+                _lastQsyCommandKhz.Value == normalizedKhz &&
+                now - _lastQsyCommandUtc < s_duplicateQsySuppressWindow)
+            {
+                LogDiag($"TX suppressed SKIMMER/QSY {normalizedKhz.ToString("F3", CultureInfo.InvariantCulture)} (duplicate)");
+                return;
+            }
+
             // CW Skimmer expects frequency in kHz with up to 3 decimal places
-            var command = $"SKIMMER/QSY {freqKhz.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}";
+            var command = $"SKIMMER/QSY {normalizedKhz.ToString("F3", CultureInfo.InvariantCulture)}";
             await _writer.WriteLineAsync(command);
             LogDiag($"TX {command}");
+            _lastQsyCommandKhz = normalizedKhz;
+            _lastQsyCommandUtc = now;
             var freqMHz = freqKhz / 1000.0;
             EmitQsySyncStatus(freqMHz);
         }
@@ -200,6 +217,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
             _lastQsyStatusFreqMHz = null;
             _lastQsySyncStatusUtc = default;
             _lastQsyStatusEmitUtc = default;
+            _lastQsyCommandKhz = null;
+            _lastQsyCommandUtc = default;
             LogDiag("DISCONNECT complete");
             EmitStatus("Telnet disconnected.");
         }
@@ -526,6 +545,8 @@ public sealed class CwSkimmerTelnetClient : ICwSkimmerTelnetClient
         _lastQsyStatusFreqMHz = null;
         _lastQsySyncStatusUtc = default;
         _lastQsyStatusEmitUtc = default;
+        _lastQsyCommandKhz = null;
+        _lastQsyCommandUtc = default;
     }
 
     private void EmitThrottledSyncStatus(ref DateTime lastStatusUtc, TimeSpan minInterval, string message)
