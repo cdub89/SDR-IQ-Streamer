@@ -7,20 +7,38 @@ namespace SDRIQStreamer.CWSkimmer.Tests;
 /// </summary>
 internal sealed class FakeAudioDeviceFinder : IAudioDeviceFinder
 {
-    private readonly Dictionary<string, int> _devices;
+    private readonly Dictionary<string, int> _signalDevices;
+    private readonly Dictionary<string, int> _audioDevices;
 
-    public FakeAudioDeviceFinder(Dictionary<string, int> devices) => _devices = devices;
-
-    public int FindCaptureDeviceIndex(string nameFragment)
+    public FakeAudioDeviceFinder(
+        Dictionary<string, int> signalDevices,
+        Dictionary<string, int>? audioDevices = null)
     {
-        foreach (var (key, idx) in _devices)
+        _signalDevices = signalDevices;
+        _audioDevices = audioDevices ?? signalDevices;
+    }
+
+    public int FindSignalDeviceIndex(string nameFragment)
+    {
+        foreach (var (key, idx) in _signalDevices)
             if (key.Contains(nameFragment, StringComparison.OrdinalIgnoreCase))
                 return idx;
         return -1;
     }
 
-    public IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllCaptureDevices()
-        => _devices.Select(kv => (kv.Value, kv.Key)).ToList();
+    public int FindAudioDeviceIndex(string nameFragment)
+    {
+        foreach (var (key, idx) in _audioDevices)
+            if (key.Contains(nameFragment, StringComparison.OrdinalIgnoreCase))
+                return idx;
+        return -1;
+    }
+
+    public IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllSignalDevices()
+        => _signalDevices.Select(kv => (kv.Value, kv.Key)).ToList();
+
+    public IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllAudioDevices()
+        => _audioDevices.Select(kv => (kv.Value, kv.Key)).ToList();
 }
 
 public sealed class CwSkimmerIniWriterTests
@@ -34,10 +52,21 @@ public sealed class CwSkimmerIniWriterTests
     private static CwSkimmerIniModel MakeModel(
         int wdmSignal    = 8,
         int wdmAudio     = 14,
+        int mmeSignal    = 0,
+        int mmeAudio     = 0,
         int sampleRate   = 48000,
         long centerFreq  = 14_048_441L,
         CwSkimmerConfig? cfg = null)
-        => new(wdmSignal, wdmAudio, sampleRate, centerFreq, cfg ?? DefaultConfig());
+        => new(
+            wdmSignal,
+            wdmAudio,
+            mmeSignal,
+            mmeAudio,
+            CalibrationBaseSignalIndex: wdmSignal,
+            CalibrationBaseAudioIndex: wdmAudio,
+            sampleRate,
+            centerFreq,
+            cfg ?? DefaultConfig());
 
     // ── [Audio] section ───────────────────────────────────────────────────────
 
@@ -250,47 +279,78 @@ public sealed class CwSkimmerTelnetClientTests
 public sealed class CwSkimmerIniModelFactoryTests
 {
     [Fact]
-    public void Build_ResolvesSignalAndAudioDevicesByName()
+    public void Build_DerivesChannelOneFromManualBaselineIni()
     {
-        var finder = new FakeAudioDeviceFinder(new Dictionary<string, int>
+        var path = Path.GetTempFileName();
+        try
         {
-            ["DAX IQ RX 1"]    = 8,
-            ["DAX Audio RX 1"] = 14,
-        });
+            File.WriteAllText(path, """
+[Audio]
+WdmSignalDev=7
+WdmAudioDev=14
+MmeSignalDev=7
+MmeAudioDev=0
+UseWdm=1
+""");
 
-        var factory = new CwSkimmerIniModelFactory(finder);
-        var model   = factory.Build(daxIqChannel: 1, sampleRateHz: 48000,
-                                    centerFreqHz: 14_048_441L, config: new CwSkimmerConfig());
+            var cfg = new CwSkimmerConfig { SkimmerIniPath = path };
+            var factory = new CwSkimmerIniModelFactory();
+            var model = factory.Build(daxIqChannel: 1, sampleRateHz: 48000,
+                                      centerFreqHz: 14_048_441L, config: cfg);
 
-        Assert.Equal(8,           model.WdmSignalDevIndex);
-        Assert.Equal(14,          model.WdmAudioDevIndex);
-        Assert.Equal(48000,       model.SampleRateHz);
-        Assert.Equal(14_048_441L, model.CenterFreqHz);
+            Assert.Equal(7, model.WdmSignalDevIndex);
+            Assert.Equal(14, model.WdmAudioDevIndex);
+            Assert.Equal(7, model.MmeSignalDevIndex);
+            Assert.Equal(0, model.MmeAudioDevIndex);
+            Assert.Equal(48000, model.SampleRateHz);
+            Assert.Equal(14_048_441L, model.CenterFreqHz);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]
-    public void Build_Channel2_ResolvesChannel2Devices()
+    public void Build_Channel2_UsesOffsetFromCalibrationBaseline()
     {
-        var finder = new FakeAudioDeviceFinder(new Dictionary<string, int>
+        var path = Path.GetTempFileName();
+        try
         {
-            ["DAX IQ RX 2"]    = 9,
-            ["DAX Audio RX 2"] = 15,
-        });
+            File.WriteAllText(path, """
+[Audio]
+WdmSignalDev=7
+WdmAudioDev=14
+MmeSignalDev=7
+MmeAudioDev=0
+UseWdm=1
+""");
 
-        var factory = new CwSkimmerIniModelFactory(finder);
-        var model   = factory.Build(daxIqChannel: 2, sampleRateHz: 48000,
-                                    centerFreqHz: 7_040_000L, config: new CwSkimmerConfig());
+            var cfg = new CwSkimmerConfig { SkimmerIniPath = path };
+            var factory = new CwSkimmerIniModelFactory();
+            var model = factory.Build(daxIqChannel: 2, sampleRateHz: 48000,
+                                      centerFreqHz: 7_040_000L, config: cfg);
 
-        Assert.Equal(9,  model.WdmSignalDevIndex);
-        Assert.Equal(15, model.WdmAudioDevIndex);
+            Assert.Equal(8, model.WdmSignalDevIndex);
+            Assert.Equal(15, model.WdmAudioDevIndex);
+            Assert.Equal(7, model.MmeSignalDevIndex);
+            Assert.Equal(0, model.MmeAudioDevIndex);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]
-    public void Build_ReturnsNegativeOne_WhenDeviceNotFound()
+    public void Build_ReturnsNegativeOne_WhenCalibrationIniMissing()
     {
-        var finder  = new FakeAudioDeviceFinder(new Dictionary<string, int>());
-        var factory = new CwSkimmerIniModelFactory(finder);
-        var model   = factory.Build(1, 48000, 14_000_000L, new CwSkimmerConfig());
+        var factory = new CwSkimmerIniModelFactory();
+        var model = factory.Build(
+            1,
+            48000,
+            14_000_000L,
+            new CwSkimmerConfig { SkimmerIniPath = @"C:\does-not-exist\cwskimmer.ini" });
 
         Assert.Equal(-1, model.WdmSignalDevIndex);
         Assert.Equal(-1, model.WdmAudioDevIndex);

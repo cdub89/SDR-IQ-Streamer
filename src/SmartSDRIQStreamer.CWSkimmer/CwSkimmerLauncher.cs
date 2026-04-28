@@ -75,16 +75,17 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     public (string SignalDevice, int SignalIdx, string AudioDevice, int AudioIdx)?
         PreviewDevices(int daxIqChannel)
     {
-        var all = _deviceFinder.ListAllCaptureDevices();
+        var signalDevices = _deviceFinder.ListAllSignalDevices();
+        var audioDevices = _deviceFinder.ListAllAudioDevices();
         string sigName = $"DAX IQ RX {daxIqChannel}";
         string audName = $"DAX Audio RX {daxIqChannel}";
 
-        int sigIdx = _deviceFinder.FindCaptureDeviceIndex(sigName);
-        int audIdx = _deviceFinder.FindCaptureDeviceIndex(audName);
+        int sigIdx = _deviceFinder.FindSignalDeviceIndex(sigName);
+        int audIdx = _deviceFinder.FindAudioDeviceIndex(audName);
         if (sigIdx < 0 && audIdx < 0) return null;
 
-        var sigEntry = all.FirstOrDefault(d => d.Name.StartsWith(sigName, StringComparison.OrdinalIgnoreCase));
-        var audEntry = all.FirstOrDefault(d => d.Name.StartsWith(audName, StringComparison.OrdinalIgnoreCase));
+        var sigEntry = signalDevices.FirstOrDefault(d => d.Name.StartsWith(sigName, StringComparison.OrdinalIgnoreCase));
+        var audEntry = audioDevices.FirstOrDefault(d => d.Name.StartsWith(audName, StringComparison.OrdinalIgnoreCase));
 
         string signalLabel = sigEntry == default ? sigName : sigEntry.Name;
         string audioLabel  = audEntry == default ? audName : audEntry.Name;
@@ -103,21 +104,21 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         string exePath = config.ExePath;
         if (!File.Exists(exePath)) return LaunchResult.ExeNotFound;
 
-        var allDevices = _deviceFinder.ListAllCaptureDevices();
         var model      = _modelFactory.Build(daxIqChannel, sampleRateHz, centerFreqHz, config);
-
-        LastDiagnostics = BuildDiagnostics(allDevices, daxIqChannel, model);
-        WriteDiagnosticLog(LastDiagnostics);
-
-        if (model.WdmSignalDevIndex < 0) return LaunchResult.DeviceNotFound;
-
         var iniPath = Path.Combine(IniDir, $"CwSkimmer-ch{daxIqChannel}.ini");
         var channelIniExists = File.Exists(iniPath);
+
+        LastDiagnostics = BuildDiagnostics(daxIqChannel, model, config.SkimmerIniPath, channelIniExists);
+        WriteDiagnosticLog(LastDiagnostics);
+
+        if (model.WdmSignalDevIndex < 0 || model.WdmAudioDevIndex < 0)
+            return LaunchResult.DeviceNotFound;
+
         if (!PrepareManagedIniFromTemplate(iniPath, config, out _))
             return LaunchResult.TemplateIniNotFound;
 
-        // Seed app-owned sections only on first creation; preserve user-managed
-        // channel INI values on subsequent launches.
+        // Audio section is seeded from calibrated baseline only on first channel INI
+        // creation. After that, operator edits in CW Skimmer are preserved.
         if (!channelIniExists)
             _iniWriter.Write(model, iniPath);
         lock (_sync)
@@ -367,26 +368,26 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     }
 
     private static string BuildDiagnostics(
-        IReadOnlyList<(int CwSkimmerIndex, string Name)> devices,
         int daxIqChannel,
-        CwSkimmerIniModel model)
+        CwSkimmerIniModel model,
+        string templateIniPath,
+        bool channelIniExists)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"=== CW Skimmer Device Diagnostic  (DAX ch {daxIqChannel}) ===");
         sb.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine();
-        sb.AppendLine("--- WinMM WaveIn capture devices (CwSkimmerIndex: name) ---");
-        if (devices.Count == 0)
-            sb.AppendLine("  (none found — SmartSDR/DAX may not be running)");
-        else
-            foreach (var (idx, name) in devices)
-                sb.AppendLine($"  [{idx:D2}] {name}");
+        sb.AppendLine("--- Calibration source ---");
+        sb.AppendLine($"  Template INI = {templateIniPath}");
+        sb.AppendLine($"  Channel INI exists = {channelIniExists}");
         sb.AppendLine();
         sb.AppendLine("--- Selected for INI ---");
-        sb.AppendLine($"  WdmSignalDev = {model.WdmSignalDevIndex}  " +
-                      $"(searching for \"DAX IQ RX {daxIqChannel}\")");
-        sb.AppendLine($"  WdmAudioDev  = {model.WdmAudioDevIndex}  " +
-                      $"(searching for \"DAX Audio RX {daxIqChannel}\")");
+        sb.AppendLine($"  Baseline WdmSignalDev = {model.CalibrationBaseSignalIndex}");
+        sb.AppendLine($"  Baseline WdmAudioDev  = {model.CalibrationBaseAudioIndex}");
+        sb.AppendLine($"  WdmSignalDev          = {model.WdmSignalDevIndex}");
+        sb.AppendLine($"  WdmAudioDev           = {model.WdmAudioDevIndex}");
+        sb.AppendLine($"  MmeSignalDev          = {model.MmeSignalDevIndex}");
+        sb.AppendLine($"  MmeAudioDev           = {model.MmeAudioDevIndex}");
         sb.AppendLine($"  SignalRate   = {model.SampleRateHz}");
         sb.AppendLine($"  CenterFreq   = {model.CenterFreqHz}");
         return sb.ToString();

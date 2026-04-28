@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -208,6 +209,130 @@ public partial class MainWindow : Window
         {
             // Ignore browser launch failures to avoid disrupting app flow.
         }
+    }
+
+    private async void OnResetChannelConfigRequested(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        if (vm.IsCwSkimmerRunning)
+        {
+            await ShowResetBlockedDialogAsync();
+            return;
+        }
+
+        var confirmed = await ShowResetChannelConfigDialogAsync();
+        if (!confirmed)
+            return;
+
+        if (vm.ResetCwSkimmerChannelConfigCommand.CanExecute(null))
+            vm.ResetCwSkimmerChannelConfigCommand.Execute(null);
+    }
+
+    private async Task<bool> ShowResetChannelConfigDialogAsync()
+    {
+        var result = false;
+
+        var message = new TextBlock
+        {
+            Text = "Reset streamer channel INI files (ch1-ch4)?\n\nThis removes only generated channel INIs. Your manual CwSkimmer.ini baseline is not changed.\n\nAfter reset, run CW Skimmer manually and review the Audio tab. Ensure DAX IQ RX 1 and DAX Audio RX 1 are selected, then exit CW Skimmer to save calibration.",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 420
+        };
+
+        var cancelButton = new Button
+        {
+            Content = "Cancel",
+            MinWidth = 80,
+            IsDefault = true
+        };
+        var resetButton = new Button
+        {
+            Content = "Reset",
+            MinWidth = 80,
+            IsCancel = true
+        };
+
+        var dialog = new Window
+        {
+            Title = "Confirm Reset",
+            Width = 470,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(16),
+                Spacing = 14,
+                Children =
+                {
+                    message,
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children = { cancelButton, resetButton }
+                    }
+                }
+            }
+        };
+
+        cancelButton.Click += (_, _) => dialog.Close();
+        resetButton.Click += (_, _) =>
+        {
+            result = true;
+            dialog.Close();
+        };
+
+        await dialog.ShowDialog(this);
+
+        return result;
+    }
+
+    private async Task ShowResetBlockedDialogAsync()
+    {
+        var message = new TextBlock
+        {
+            Text = "CW Skimmer is currently running.\n\nStop all CW Skimmer instances before resetting channel INI files.",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 400
+        };
+
+        var okButton = new Button
+        {
+            Content = "OK",
+            MinWidth = 80,
+            IsDefault = true
+        };
+
+        var dialog = new Window
+        {
+            Title = "Reset Blocked",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(16),
+                Spacing = 14,
+                Children =
+                {
+                    message,
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Children = { okButton }
+                    }
+                }
+            }
+        };
+
+        okButton.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
     }
 
 }

@@ -6,16 +6,38 @@ namespace SDRIQStreamer.CWSkimmer;
 /// </summary>
 public sealed record CwSkimmerIniModel(
     /// <summary>
-    /// Zero-based WaveIn capture device index for "DAX IQ RX N".
-    /// Written to [Audio] WdmSignalDev.  -1 if the device was not found.
+    /// CW Skimmer WDM signal device index for channel N, derived from manual
+    /// IQ1 calibration and channel offset.
+    /// Written to [Audio] WdmSignalDev. -1 when calibration is unavailable.
     /// </summary>
     int WdmSignalDevIndex,
 
     /// <summary>
-    /// Zero-based WaveIn capture device index for "DAX Audio RX N".
-    /// Written to [Audio] WdmAudioDev.  -1 if the device was not found.
+    /// CW Skimmer WDM audio device index for channel N, derived from manual
+    /// Audio RX1 calibration and channel offset.
+    /// Written to [Audio] WdmAudioDev. -1 when calibration is unavailable.
     /// </summary>
     int WdmAudioDevIndex,
+
+    /// <summary>
+    /// MME signal device index copied from the operator-calibrated template INI.
+    /// </summary>
+    int MmeSignalDevIndex,
+
+    /// <summary>
+    /// MME audio device index copied from the operator-calibrated template INI.
+    /// </summary>
+    int MmeAudioDevIndex,
+
+    /// <summary>
+    /// Baseline WDM signal index from manual IQ1 calibration.
+    /// </summary>
+    int CalibrationBaseSignalIndex,
+
+    /// <summary>
+    /// Baseline WDM audio index from manual Audio RX1 calibration.
+    /// </summary>
+    int CalibrationBaseAudioIndex,
 
     /// <summary>DAX-IQ stream sample rate in Hz (e.g. 48000). Written to [sdrSDRIQ] SignalRate.</summary>
     int SampleRateHz,

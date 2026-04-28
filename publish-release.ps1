@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $projectPath = Join-Path $PSScriptRoot "SmartSDRIQStreamer.csproj"
 $publishDir = Join-Path $PSScriptRoot "bin/$Configuration/net8.0-windows/$Runtime/publish"
 
-Write-Host "== SmartSDR-IQ-Streamer release publish ==" -ForegroundColor Cyan
+Write-Host "== SmartStreamer4 release publish ==" -ForegroundColor Cyan
 Write-Host "Project: $projectPath"
 Write-Host "Runtime: $Runtime"
 Write-Host "Configuration: $Configuration"
@@ -34,7 +34,7 @@ dotnet publish $projectPath `
     -p:DebugType=None
 
 Write-Host "`n[3/3] Cleaning non-exe publish artifacts..." -ForegroundColor Yellow
-$dllConfigPath = Join-Path $publishDir "SDRIQStreamer.dll.config"
+$dllConfigPath = Join-Path $publishDir "SmartStreamer4.dll.config"
 if (Test-Path $dllConfigPath) {
     Remove-Item $dllConfigPath -Force
 }

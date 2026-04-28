@@ -75,8 +75,8 @@ public sealed class CwSkimmerIniWriter
             [
                 $"WdmSignalDev={model.WdmSignalDevIndex}",
                 $"WdmAudioDev={model.WdmAudioDevIndex}",
-                "MmeSignalDev=0",
-                "MmeAudioDev=0",
+                $"MmeSignalDev={model.MmeSignalDevIndex}",
+                $"MmeAudioDev={model.MmeAudioDevIndex}",
                 "UseWdm=1",
                 "ShiftQ=0",
                 "SwapIQ=0",

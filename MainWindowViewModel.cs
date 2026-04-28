@@ -238,7 +238,7 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     public string AppBuildDisplay => s_appBuildInfo.Display;
     public string AppBuildDate => s_appBuildInfo.BuildDate;
     private string AppReleaseTagForUpdateChecks => ResolveReleaseTagForUpdateChecks();
-    public string WindowTitle => $"SDR-IQ-Streamer {AppBuildDisplay}";
+    public string WindowTitle => $"SmartStreamer4 {AppBuildDisplay}";
     public string ConnectTargetHeaderColor => IsConnected ? "Green" : "Gray";
     public string ConnectTargetHeaderText
     {
@@ -867,6 +867,42 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private bool CanResetNetworkStatus() => IsConnected;
 
     [RelayCommand]
+    private void ResetCwSkimmerChannelConfig()
+    {
+        if (_launcher.IsRunning)
+        {
+            AddStreamerStatus("Stop CW Skimmer before resetting channel INI files.");
+            return;
+        }
+
+        var iniDir = ResolveCwSkimmerIniDir();
+        var deleted = 0;
+
+        for (var channel = 1; channel <= 4; channel++)
+        {
+            var path = Path.Combine(iniDir, $"CwSkimmer-ch{channel}.ini");
+            if (!File.Exists(path))
+                continue;
+
+            try
+            {
+                File.Delete(path);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                AddStreamerStatus($"Failed to delete channel INI ch {channel}: {ex.Message}");
+            }
+        }
+
+        UpdateTelnetIniSummary();
+        AddStreamerStatus(
+            deleted > 0
+                ? $"Reset CW Skimmer channel INI files ({deleted} removed). Next launch will seed from manual IQ1 baseline."
+                : "No channel INI files found to reset.");
+    }
+
+    [RelayCommand]
     private async Task CheckForUpdatesAsync()
     {
         await CheckForUpdatesCoreAsync("manual", _updateCheckLoopCts.Token);
@@ -1327,6 +1363,20 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     {
         var streamerLogPath = ResolveStreamerLogPath();
         return Path.GetDirectoryName(streamerLogPath) ?? string.Empty;
+    }
+
+    private static string ResolveCwSkimmerIniDir()
+    {
+        var repoRoot = TryFindRepoRoot(new DirectoryInfo(AppContext.BaseDirectory))
+            ?? TryFindRepoRoot(new DirectoryInfo(Environment.CurrentDirectory));
+
+        if (repoRoot is not null)
+            return Path.Combine(repoRoot.FullName, "artifacts", "cwskimmer", "ini");
+
+        var appDataRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SDRIQStreamer");
+        return Path.Combine(appDataRoot, "artifacts", "cwskimmer", "ini");
     }
 
     private static DirectoryInfo? TryFindRepoRoot(DirectoryInfo? start)

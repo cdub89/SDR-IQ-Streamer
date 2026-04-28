@@ -146,7 +146,7 @@ public sealed class ReleaseUpdateService : IReleaseUpdateService
         {
             Timeout = TimeSpan.FromSeconds(8)
         };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SDRIQStreamer/1.0 (+https://github.com/cdub89/SDR-IQ-Streamer)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SmartStreamer4/1.0 (+https://github.com/cdub89/SDR-IQ-Streamer)");
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
     }

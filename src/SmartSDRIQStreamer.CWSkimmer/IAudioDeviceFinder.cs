@@ -1,7 +1,7 @@
 namespace SDRIQStreamer.CWSkimmer;
 
 /// <summary>
-/// Finds Windows audio capture device indices by name fragment.
+/// Finds Windows audio device indices by name fragment.
 /// Abstraction over NAudio/WinMM so the INI model factory is unit-testable
 /// without requiring real audio devices.
 /// </summary>
@@ -23,12 +23,26 @@ public interface IAudioDeviceFinder
     ///
     /// Returns -1 if no matching device is found.
     /// </summary>
-    int FindCaptureDeviceIndex(string nameFragment);
+    int FindSignalDeviceIndex(string nameFragment);
 
     /// <summary>
-    /// Returns all enumerated capture devices as (CwSkimmerIndex, ProductName) pairs,
+    /// Returns the CW Skimmer-compatible WDM device index for the first WaveOut
+    /// playback device whose product name starts with <paramref name="nameFragment"/>
+    /// (case-insensitive). Returns -1 if no matching device is found.
+    /// </summary>
+    int FindAudioDeviceIndex(string nameFragment);
+
+    /// <summary>
+    /// Returns all enumerated signal/input devices as (CwSkimmerIndex, ProductName) pairs,
     /// ordered by index.  CwSkimmerIndex = WinMM zero-based index + 1.
     /// Used for diagnostics and logging.
     /// </summary>
-    IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllCaptureDevices();
+    IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllSignalDevices();
+
+    /// <summary>
+    /// Returns all enumerated audio/output devices as (CwSkimmerIndex, ProductName) pairs,
+    /// ordered by index.  CwSkimmerIndex = WinMM zero-based index + 1.
+    /// Used for diagnostics and logging.
+    /// </summary>
+    IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllAudioDevices();
 }

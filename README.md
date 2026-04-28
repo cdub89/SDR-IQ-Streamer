@@ -1,17 +1,18 @@
-# SmartSDR-IQ-Streamer
+# SmartStreamer4
 
 Modernizes CW Skimmer integration with FlexRadio DAX-IQ streams using a dedicated Avalonia desktop app.
 License: MIT (see `LICENSE`).
 
-<img width="620" alt="SDR-IQ-Streamer operating view" src="Assets/README/operating-screenshot-v0.1.9b.png" />
+<img width="620" alt="SmartStreamer4 operating view" src="Assets/README/operating-screenshot-v0.1.9b.png" />
 
 
 ## 1) Quick Start
 
 ### First-Time Setup / Get Started
 
-- Launch `SDRIQStreamer.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
-- Click the streamer's `Config` tab and set the local path to `CwSkimmer.exe` and the associated INI file. You may need to run CW Skimmer manually at least once to review and save initial settings.
+- Launch `SmartStreamer4.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
+- Click the streamer's `Config` tab and set the local path to `CwSkimmer.exe` and the associated INI file.
+- Before first streamer launch on a machine, run CW Skimmer manually and calibrate only `DAX IQ RX 1` + `DAX Audio RX 1`, then exit CW Skimmer to save `CwSkimmer.ini`.
 - In the `Operating` tab, click the radio and press **Connect**. After a few seconds you should see the available slices and IQ streams needed to launch CW Skimmer.
 - Once CW Skimmer is running, view settings and verify the `Radio`, `Audio`, and `Operator` tabs are correct for your station.
 - Click **Start** in the CW Skimmer toolbar to begin decoding.
@@ -43,6 +44,10 @@ License: MIT (see `LICENSE`).
 ## 5) CW Skimmer Integration Approach
 
 - Build channel-specific managed INI files from a user-selected template.
+- Device mapping model is machine-local calibration:
+  - operator calibrates manual `CwSkimmer.ini` for channel 1 (`DAX IQ RX 1` + `DAX Audio RX 1`),
+  - streamer derives channel `N` WDM indices by offset from that baseline on first channel-INI creation.
+- If operator corrects channel device selections in CW Skimmer and exits, streamer preserves existing channel INI `[Audio]` values on later launches.
 - Launch CW Skimmer per DAX-IQ channel and connect a Telnet client.
 - Runtime sync model:
   - Slice frequency updates drive channel-matched `SKIMMER/QSY`.
@@ -79,7 +84,7 @@ dotnet run
 
 ```powershell
 dotnet build -c Release
-.\bin\Release\net8.0-windows\SDRIQStreamer.exe
+.\bin\Release\net8.0-windows\SmartStreamer4.exe
 ```
 
 ### Release Packaging
@@ -88,7 +93,7 @@ dotnet build -c Release
 powershell -ExecutionPolicy Bypass -File .\publish-release.ps1 -Configuration Release -Runtime win-x64
 ```
 
-- Publish GitHub releases with attached binaries (`SDRIQStreamer-v<version>-win-x64.zip`) and checksum asset (`SHA256SUMS.txt`).
+- Publish GitHub releases with attached binaries (`SmartStreamer4-v<version>-win-x64.zip`) and checksum asset (`SHA256SUMS.txt`).
 
 ### Tests
 
@@ -99,7 +104,7 @@ dotnet test tests
 ## 8) Project Layout
 
 ```text
-SDR-IQ-Streamer/
+SmartStreamer4/
 ├── SmartSDR-IQ-Streamer.MDC
 ├── SmartSDRIQStreamer.csproj
 ├── README.md

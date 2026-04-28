@@ -1,4 +1,4 @@
-# SmartSDR-IQ-Streamer Setup Guide (Wizard Style)
+# SmartStreamer4 Setup Guide (Wizard Style)
 
 This guide walks through setup in a step-by-step flow, including CW Skimmer master INI preparation and operational troubleshooting.
 
@@ -103,7 +103,7 @@ After all tab settings are validated, save, set the CW Skimmer window size and p
 
 ## Step 3 - Configure Streamer Paths
 
-1. Launch `SDRIQStreamer.exe`.
+1. Launch `SmartStreamer4.exe`.
 2. Open the `Config` tab.
 3. Set:
   - `CwSkimmer.exe` path
