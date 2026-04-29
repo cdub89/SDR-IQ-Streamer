@@ -19,6 +19,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="FlexLib_API_v4.1.5.39794\**" />
+    <EmbeddedResource Remove="FlexLib_API_v4.1.5.39794\**" />
+    <None Remove="FlexLib_API_v4.1.5.39794\**" />
+    <Compile Remove="FlexLib_API_v4.2.18.41174\**" />
+    <EmbeddedResource Remove="FlexLib_API_v4.2.18.41174\**" />
+    <None Remove="FlexLib_API_v4.2.18.41174\**" />
     <Compile Remove="reference\**" />
     <Compile Remove=".cursor\**" />
     <Compile Remove="src\**" />

@@ -22,7 +22,7 @@ License: MIT (see `LICENSE`).
 
 - UI: Avalonia (`net8.0-windows`)
 - App pattern: MVVM (`CommunityToolkit.Mvvm`)
-- Radio integration: FlexRadio FlexLib API `v4.1.5.39794`
+- Radio integration: FlexRadio FlexLib API `v4.2.18.41174` (SmartSDR 4.x)
 - CW decoder integration: CW Skimmer process + Telnet control channel
 
 ## 3) High-Level Architecture
@@ -45,7 +45,7 @@ License: MIT (see `LICENSE`).
 
 - Build channel-specific managed INI files from a user-selected template.
 - Device mapping model is machine-local calibration:
-  - operator calibrates manual `CwSkimmer.ini` for channel 1 (`DAX IQ RX 1` + `DAX Audio RX 1`),
+  - operator calibrates manual `CwSkimmer.ini` for channel 1 (Signal I/O: `DAX IQ 1`; Audio I/O: any local audio output),
   - streamer derives channel `N` WDM indices by offset from that baseline on first channel-INI creation.
 - If operator corrects channel device selections in CW Skimmer and exits, streamer preserves existing channel INI `[Audio]` values on later launches.
 - Launch CW Skimmer per DAX-IQ channel and connect a Telnet client.
@@ -64,7 +64,7 @@ License: MIT (see `LICENSE`).
 - CW Skimmer installed
 - FLEX-6x00/8x00 radio reachable on local network
 - Local radio required in the current implementation (SmartLink/VPN deferred)
-- FlexLib API package downloaded and extracted to `FlexLib_API_v4.1.5.39794` in project root
+- FlexLib API package downloaded and extracted to `FlexLib_API_v4.2.18.41174` in project root
 
 ## 7) Build, Run, Test
 
@@ -138,7 +138,7 @@ SmartStreamer4/
 
 ## 10) Notes
 
-- `FlexLib_API_v4.1.5.39794` is intentionally excluded from version control.
+- `FlexLib_API_v4.2.18.41174` is intentionally excluded from version control.
 - Download FlexLib API (SmartSDR v4): [https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/](https://www.flexradio.com/software/smartsdr-v4-x-api-flexlib/)
 - Build may emit legacy FlexLib warnings on `net8.0-windows`; tracked separately.
 - Phase status and roadmap tracking are maintained in `SmartSDR-IQ-Streamer.MDC` (single source of truth).
@@ -146,7 +146,41 @@ SmartStreamer4/
   - `artifacts/cwskimmer/ini` for per-channel INI and diagnostics
   - `artifacts/logs` for runtime status logs
 
-## 11) Alpha.6 Validation Snapshot
+## 11) FlexLib 4.2.x Upgrade
+
+SmartStreamer4 targets **FlexLib 4.2.18** (`FlexLib_API_v4.2.18.41174`). This section summarises what changed from 4.1.5 and what is needed to build against the new library.
+
+### Radio / firmware prerequisite
+
+FlexLib 4.2.x requires radio firmware **≥ 3.3.32.8203**. Update the radio before connecting with a 4.2.x-built application.
+
+### Files changed in the upgrade
+
+| File | Change |
+|------|--------|
+| `src/SmartSDRIQStreamer.FlexRadio/SmartSDRIQStreamer.FlexRadio.csproj` | `ProjectReference` updated from `FlexLib_API_v4.1.5.39794` to `FlexLib_API_v4.2.18.41174` |
+| `SmartSDRIQStreamer.csproj` | Added `<EmbeddedResource Remove>` and `<None Remove>` glob exclusions for both FlexLib folders so the SDK does not auto-include `.resx` and other assets from the unbuilt library tree |
+
+No application source code changes were required. The breaking API changes in FlexLib 4.2.x (`HAAPI.AmplifierFault` rename, `HAAPI.AmpIsSelected` removal) do not affect this app; `Radio.InUseIP` / `Radio.InUseHost` deprecations are internal to FlexLib and produce warnings only in the library build, not in application code.
+
+### Getting the FlexLib package
+
+`FlexLib_API_v4.2.18.41174` is not included in version control. Download the FlexLib API source from FlexRadio and extract it to the project root so the folder exists at:
+
+```
+SmartSDR-IQ-Streamer/
+└── FlexLib_API_v4.2.18.41174/
+    └── FlexLib/
+        └── FlexLib.csproj
+```
+
+### Migration reference
+
+`Flexlib4-2-Migration-Guide.md` in the repository root documents the full 4.1.5 → 4.2.18 API surface change, including all breaking changes, deprecations, and new features.
+
+---
+
+## 12) Alpha.6 Validation Snapshot
 
 - Run start: `2026-04-16 20:15:23` (`Release: 0.1.0-alpha.6`, `Commit: 1260b434`).
 - Initial radio connect: `2026-04-16 20:15:36` to FLEX-6600.

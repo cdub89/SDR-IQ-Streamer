@@ -10,8 +10,8 @@ Before launching the streamer, confirm:
 
 - Windows 10/11 is supported today (FlexLib .NET 8.0 requirement)
 - FLEX-6000/8000 radio is powered on and connected to the local network
-- SmartSDR v4.1.5 installed and running (latest)
-- DAX v4.1.5 installed and running (latest)
+- SmartSDR 4.x installed and running (SmartStreamer4 is designed for SmartSDR 4.x; firmware ≥ 3.3.32 required)
+- DAX 4.x installed and running
 - CW Skimmer v2.1 installed
 
 If any item above is missing, stop and fix that first. Common issues include:
@@ -77,13 +77,23 @@ Use this section while running CW Skimmer standalone.
 
 ### Audio tab
 
-- Select the intended DAX devices for your environment.
-- For Signal I/O Device, select the DAX IQ RX-N stream to match the streaming DAX-IQ channel in SmartSDR DAX.
-- For Audio I/O Device, select the DAX Audio RX-N device.
+SmartSDR 4.x exposes the DAX IQ stream as a standard audio device. Configure as follows:
 
-- Confirm input levels are active and stable (not clipping, not flatline).
-- Verify sample-rate-related behavior is stable for your normal channels.
-![CW Skimmer Audio tab example](Assets/SetupWizard/image-6c01eddc-e2e5-46dd-a904-1cae43587776.png)
+- **Soundcard Driver**: WDM is recommended. MME also works with slightly different device names.
+- **Signal I/O Device**:
+  - WDM: select `DAX IQ 1`
+  - MME: select `DAX IQ 1 (FlexRadio DAX)`
+- **Audio I/O Device**: select any local audio output (e.g. `Realtek HD Audio output`). No DAX Audio RX device is needed or available here — this slot is for CW Skimmer's local audio monitoring only.
+- **Channels**: `Left/Right = I / Q`
+- **Shift Right Channel Data by**: `0 samples`
+
+Confirm input levels are active and stable (not clipping, not flatline) after connecting.
+
+WDM (recommended):
+![CW Skimmer Audio tab - WDM](Assets/SetupWizard/WDM IQ Setting.png)
+
+MME:
+![CW Skimmer Audio tab - MME](Assets/SetupWizard/MME IQ Setting.png)
 
 ### Operator tab
 
