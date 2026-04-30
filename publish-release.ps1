@@ -33,23 +33,28 @@ dotnet publish $projectPath `
     -p:DebugSymbols=false `
     -p:DebugType=None
 
-Write-Host "`n[3/3] Cleaning non-exe publish artifacts..." -ForegroundColor Yellow
+Write-Host "`n[3/4] Cleaning non-exe publish artifacts..." -ForegroundColor Yellow
 $dllConfigPath = Join-Path $publishDir "SmartStreamer4.dll.config"
 if (Test-Path $dllConfigPath) {
     Remove-Item $dllConfigPath -Force
 }
 
+$version = ([xml](Get-Content $projectPath)).Project.PropertyGroup.Version
+$exeName = "SmartStreamer4.exe"
+$exePath = Join-Path $publishDir $exeName
+$zipLabel = "SmartStreamer4-v${version}-$Runtime.zip"
+$zipPath = Join-Path $publishDir $zipLabel
+
+Write-Host "`n[4/4] Creating release zip..." -ForegroundColor Yellow
+Compress-Archive -Path $exePath -DestinationPath $zipPath -Force
+
+$hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+
 Write-Host "`nPublish output:" -ForegroundColor Green
 Get-ChildItem $publishDir | Sort-Object Name | Format-Table Name, Length, LastWriteTime -AutoSize
 
-$exeName = "SmartStreamer4.exe"
-$exePath = Join-Path $publishDir $exeName
-$hash = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
-$version = ([xml](Get-Content $projectPath)).Project.PropertyGroup.Version
-$assetLabel = "SmartStreamer4-v${version}-$Runtime.exe"
-
-Write-Host "`nSHA256: $hash  $assetLabel" -ForegroundColor Cyan
+Write-Host "`nSHA256: $hash  $zipLabel" -ForegroundColor Cyan
 Write-Host "`nNext: bump SHA256SUMS.txt, commit release assets, then publish to GitHub:" -ForegroundColor Yellow
-Write-Host "  gh release create v$version `"$exePath#$assetLabel`" --title `"SmartStreamer4 v$version`" --notes `"...`" --latest" -ForegroundColor White
+Write-Host "  gh release create v$version `"$zipPath#$zipLabel`" --title `"SmartStreamer4 v$version`" --notes `"...`" --latest" -ForegroundColor White
 
 Write-Host "`nDone." -ForegroundColor Green

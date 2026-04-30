@@ -9,4 +9,4 @@ b5a348ba5355d79546aa53903b5f40ea88eca7c1eeacfb8c18e960963a8cf36f  SDRIQStreamer-
 ab5f33dda2c15286028f9a84809ed66b6ef0932ad3dbbc7d00bdea3347a900de  SDRIQStreamer-v0.1.10b-win-x64.zip
 4e76ba2fad03b313a986e3a2271b7fd4893c4328b7ec54f027d6db7ae51db1de  SmartStreamer4-v0.1.11b-win-x64.zip
 4fcf6129cdfaa26d3030a5d34c547ae9394814d2c665c5f92bbb6f171f53583e  SmartStreamer4-v0.1.12b-win-x64.zip
-5b1ded11fffb8ba761c33b1e6c73d5eac4d25181381445251487d7101b9aca44  SmartStreamer4-v0.1.13b-win-x64.exe
+591a0c397903c1bfd62b43d8887cdd1ca3641899294cb93dd76bc70b98a96b0a  SmartStreamer4-v0.1.13b-win-x64.zip
