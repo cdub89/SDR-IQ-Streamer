@@ -79,21 +79,21 @@ Use this section while running CW Skimmer standalone.
 
 SmartSDR 4.x exposes the DAX IQ stream as a standard audio device. Configure as follows:
 
-- **Soundcard Driver**: WDM is recommended. MME also works with slightly different device names.
+- **Soundcard Driver**: **MME is recommended for SmartSDR 4.2.x.** Testing on SmartSDR 4.2.x shows MME produces a more stable waterfall and better decode rates than WDM on at least some machines. WDM also works but your results may vary.
 - **Signal I/O Device**:
-  - WDM: select `DAX IQ 1`
   - MME: select `DAX IQ 1 (FlexRadio DAX)`
+  - WDM: select `DAX IQ 1`
 - **Audio I/O Device**: select any local audio output (e.g. `Realtek HD Audio output`). No DAX Audio RX device is needed or available here — this slot is for CW Skimmer's local audio monitoring only.
 - **Channels**: `Left/Right = I / Q`
 - **Shift Right Channel Data by**: `0 samples`
 
 Confirm input levels are active and stable (not clipping, not flatline) after connecting.
 
-WDM (recommended):
-![CW Skimmer Audio tab - WDM](Assets/SetupWizard/WDM IQ Setting.png)
-
-MME:
+MME (recommended for SmartSDR 4.2.x):
 ![CW Skimmer Audio tab - MME](Assets/SetupWizard/MME IQ Setting.png)
+
+WDM:
+![CW Skimmer Audio tab - WDM](Assets/SetupWizard/WDM IQ Setting.png)
 
 ### Operator tab
 
@@ -189,6 +189,8 @@ If radio is disconnected from streamer, streamer should also stop active skimmer
 - Re-run CW Skimmer standalone and correct Audio tab settings in master INI.
 - Save, close, and relaunch through streamer.
 - For first-time channel setup, remove only the affected `CwSkimmer-chN.ini` and relaunch.
+
+> **After upgrades:** Channel-specific INI files (`CwSkimmer-chN.ini`) are created once from the master INI and then preserved across launches to protect your settings. This means changes to the master INI — such as switching between WDM and MME, or adjusting audio device selections — are **not** automatically picked up by existing channel files. After an upgrade or after changing audio driver settings in the master INI, use the **Reset Channel INIs** button in the streamer to delete the generated channel files. The next launch will re-seed them from the current master INI.
 
 ### C) Settings not retained as expected
 

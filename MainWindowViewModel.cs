@@ -193,6 +193,7 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _sliceSyncCtsByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _stabilityResendCtsByChannel = new();
+    private readonly Dictionary<int, CancellationTokenSource> _streamRemovedDebounceCtsByChannel = new();
     private readonly CancellationTokenSource _updateCheckLoopCts = new();
     private readonly SemaphoreSlim _updateCheckLock = new(1, 1);
     private Task? _updateCheckLoopTask;
@@ -212,6 +213,7 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private static readonly TimeSpan RitStatusMinInterval = TimeSpan.FromMilliseconds(500);
     private const long PanSyncMinCenterDeltaHz = 10;
     private static readonly TimeSpan PanSyncStabilityResendDelay = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan DaxStreamRemovedGracePeriod = TimeSpan.FromMilliseconds(1500);
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
 
@@ -489,6 +491,12 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
                         cts.Dispose();
                     }
                     _stabilityResendCtsByChannel.Clear();
+                    foreach (var cts in _streamRemovedDebounceCtsByChannel.Values)
+                    {
+                        try { cts.Cancel(); } catch { }
+                        cts.Dispose();
+                    }
+                    _streamRemovedDebounceCtsByChannel.Clear();
                 }
                 _ritStatusEmitter.Clear();
                 AddStreamerStatus("Disconnected.");
@@ -500,6 +508,10 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     private void OnDaxIQStreamAdded(DaxIQStreamInfo stream)
     {
+        // SmartSDR 4.2.x may transiently remove then re-add the stream during reconfiguration.
+        // Cancel any pending debounced stop so the skimmer keeps running.
+        CancelStreamRemovedDebounce(stream.DAXIQChannel);
+
         var normalized = NormalizeStreamForPan(stream);
         if (DaxIQStreams.All(x => x.DAXIQChannel != normalized.DAXIQChannel))
             DaxIQStreams.Add(normalized);
@@ -514,7 +526,20 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     private void OnDaxIQStreamRemoved(DaxIQStreamInfo stream)
     {
-        StopSkimmerIfRunningForDisabledChannel(stream.DAXIQChannel, "DAX-IQ stream removed");
+        // Debounce the stop: SmartSDR 4.2.x can transiently remove/re-add the IQ stream
+        // (e.g., during panadapter moves or after QSY).  If it reappears within the grace
+        // period, OnDaxIQStreamAdded cancels the pending stop.
+        var channel = stream.DAXIQChannel;
+        var cts = ReplaceStreamRemovedDebounceCts(channel);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(DaxStreamRemovedGracePeriod, cts.Token);
+                UIPost(() => StopSkimmerIfRunningForDisabledChannel(channel, "DAX-IQ stream removed"));
+            }
+            catch (OperationCanceledException) { }
+        });
 
         var m = DaxIQStreams.FirstOrDefault(x => x.DAXIQChannel == stream.DAXIQChannel);
         if (m is not null) DaxIQStreams.Remove(m);
@@ -526,8 +551,8 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     private void OnDaxIQStreamUpdated(DaxIQStreamInfo stream)
     {
-        if (!stream.IsActive)
-            StopSkimmerIfRunningForDisabledChannel(stream.DAXIQChannel, "DAX-IQ stream inactive");
+        // IsActive=false means another DAX client (CW Skimmer via WDM) is the active
+        // consumer — this is the expected state while the skimmer is running.  Do not stop.
 
         var normalized = NormalizeStreamForPan(stream);
         ReplaceDaxStream(normalized);
@@ -1838,6 +1863,39 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         }
 
         return next;
+    }
+
+    private CancellationTokenSource ReplaceStreamRemovedDebounceCts(int daxIqChannel)
+    {
+        var next = new CancellationTokenSource();
+        CancellationTokenSource? previous;
+
+        lock (_syncDampenGate)
+        {
+            _streamRemovedDebounceCtsByChannel.TryGetValue(daxIqChannel, out previous);
+            _streamRemovedDebounceCtsByChannel[daxIqChannel] = next;
+        }
+
+        if (previous is not null)
+        {
+            try { previous.Cancel(); } catch { }
+            previous.Dispose();
+        }
+
+        return next;
+    }
+
+    private void CancelStreamRemovedDebounce(int daxIqChannel)
+    {
+        CancellationTokenSource? toDispose = null;
+        lock (_syncDampenGate)
+        {
+            if (_streamRemovedDebounceCtsByChannel.TryGetValue(daxIqChannel, out toDispose))
+                _streamRemovedDebounceCtsByChannel.Remove(daxIqChannel);
+        }
+        if (toDispose is null) return;
+        try { toDispose.Cancel(); } catch { }
+        toDispose.Dispose();
     }
 
     private void QueuePanSyncStabilityResend(int daxIqChannel, double freqMHz, string reason)

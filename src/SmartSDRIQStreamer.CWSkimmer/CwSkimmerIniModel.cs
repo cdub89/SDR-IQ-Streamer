@@ -30,6 +30,12 @@ public sealed record CwSkimmerIniModel(
     int MmeAudioDevIndex,
 
     /// <summary>
+    /// Whether CW Skimmer should use WDM (true) or MME (false).
+    /// Copied verbatim from the operator-calibrated template INI UseWdm key.
+    /// </summary>
+    bool UseWdm,
+
+    /// <summary>
     /// Baseline WDM signal index from manual IQ1 calibration.
     /// </summary>
     int CalibrationBaseSignalIndex,

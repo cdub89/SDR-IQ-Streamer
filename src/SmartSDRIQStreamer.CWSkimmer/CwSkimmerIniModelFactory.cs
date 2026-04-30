@@ -21,13 +21,14 @@ public sealed class CwSkimmerIniModelFactory
         long             centerFreqHz,
         CwSkimmerConfig  config)
     {
-        if (!TryReadCalibration(config.SkimmerIniPath, out var baselineSignal, out var baselineAudio, out var mmeSignal, out var mmeAudio))
+        if (!TryReadCalibration(config.SkimmerIniPath, out var baselineSignal, out var baselineAudio, out var mmeSignal, out var mmeAudio, out var useWdm))
         {
             return new CwSkimmerIniModel(
                 WdmSignalDevIndex: -1,
                 WdmAudioDevIndex: -1,
                 MmeSignalDevIndex: 0,
                 MmeAudioDevIndex: 0,
+                UseWdm: true,
                 CalibrationBaseSignalIndex: -1,
                 CalibrationBaseAudioIndex: -1,
                 SampleRateHz: sampleRateHz,
@@ -44,6 +45,7 @@ public sealed class CwSkimmerIniModelFactory
             WdmAudioDevIndex:  wdmAudio,
             MmeSignalDevIndex: mmeSignal,
             MmeAudioDevIndex: mmeAudio,
+            UseWdm: useWdm,
             CalibrationBaseSignalIndex: baselineSignal,
             CalibrationBaseAudioIndex: baselineAudio,
             SampleRateHz:      sampleRateHz,
@@ -56,12 +58,14 @@ public sealed class CwSkimmerIniModelFactory
         out int baselineSignal,
         out int baselineAudio,
         out int mmeSignal,
-        out int mmeAudio)
+        out int mmeAudio,
+        out bool useWdm)
     {
         baselineSignal = -1;
         baselineAudio = -1;
         mmeSignal = 0;
         mmeAudio = 0;
+        useWdm = true;
 
         if (string.IsNullOrWhiteSpace(templateIniPath) || !File.Exists(templateIniPath))
             return false;
@@ -96,6 +100,8 @@ public sealed class CwSkimmerIniModelFactory
                 mmeSignal = parsed;
             else if (key.Equals("MmeAudioDev", StringComparison.OrdinalIgnoreCase))
                 mmeAudio = parsed;
+            else if (key.Equals("UseWdm", StringComparison.OrdinalIgnoreCase))
+                useWdm = parsed != 0;
         }
 
         return baselineSignal >= 0 && baselineAudio >= 0;

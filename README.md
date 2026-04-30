@@ -45,7 +45,7 @@ License: MIT (see `LICENSE`).
 
 - Build channel-specific managed INI files from a user-selected template.
 - Device mapping model is machine-local calibration:
-  - operator calibrates manual `CwSkimmer.ini` for channel 1 (Signal I/O: `DAX IQ 1`; Audio I/O: any local audio output),
+  - operator calibrates manual `CwSkimmer.ini` for channel 1 (Signal I/O: `DAX IQ 1 (FlexRadio DAX)` on MME, recommended for SmartSDR 4.2.x; or `DAX IQ 1` on WDM; Audio I/O: any local audio output),
   - streamer derives channel `N` WDM indices by offset from that baseline on first channel-INI creation.
 - If operator corrects channel device selections in CW Skimmer and exits, streamer preserves existing channel INI `[Audio]` values on later launches.
 - Launch CW Skimmer per DAX-IQ channel and connect a Telnet client.
