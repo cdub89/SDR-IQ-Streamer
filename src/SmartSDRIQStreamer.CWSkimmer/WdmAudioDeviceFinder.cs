@@ -3,16 +3,15 @@ using System.Runtime.InteropServices;
 namespace SDRIQStreamer.CWSkimmer;
 
 /// <summary>
-/// Resolves CW Skimmer WDM indices by enumerating WinMM capture devices at runtime.
-/// This avoids machine-specific hardcoded offsets and automatically adapts to radios
-/// that expose different numbers/order of DAX endpoints.
+/// Resolves CW Skimmer audio device indices by enumerating WinMM capture/playback
+/// devices at runtime.  All public Find* methods return the 1-based UI display number
+/// (WinMM index + 1), which matches what CW Skimmer shows in its Audio tab dropdown.
+/// To write to a CW Skimmer INI file subtract 1: INI value = WinMM index.
 /// </summary>
 public sealed class WdmAudioDeviceFinder : IAudioDeviceFinder
 {
-    // Historical CW Skimmer mapping (INI is 0-based, UI display is +1):
-    //   DAX IQ RX 1 -> 7 (UI "08"), DAX IQ RX 2 -> 8, ...
-    //   DAX Audio RX 1 -> 14 (UI "15"), DAX Audio RX 2 -> 15, ...
-    // Keep this as a deterministic fallback only when runtime name resolution fails.
+    // Last-resort sequential fallback indices (INI 0-based) used only when WinMM
+    // runtime enumeration finds no matching device by name.
     private const int FixedSignalBase = 7;
     private const int FixedAudioBase  = 14;
 
@@ -58,6 +57,18 @@ public sealed class WdmAudioDeviceFinder : IAudioDeviceFinder
             return FixedAudioBase + (audioChannel - 1);
 
         return -1;
+    }
+
+    public int FindDaxIqSignalDeviceIndex(int channel)
+    {
+        // DAX v2 (SmartSDR 4.2.x): "DAX IQ {N} (FlexRadio DAX)" — 24 chars, no WinMM truncation.
+        // StartsWith("DAX IQ {N}") cannot match "DAX IQ RX {N}" (R breaks it) — probes are safe.
+        int idx = FindSignalDeviceIndex($"DAX IQ {channel}");
+        if (idx >= 0) return idx;
+
+        // DAX v1 (SmartSDR 4.1.x): "DAX IQ RX {N} (FlexRadio Systems DAX IQ)" truncated to 31 chars.
+        // StartsWith("DAX IQ RX {N}") cannot match "DAX RESERVED IQ RX {N}" — safe exclusion.
+        return FindSignalDeviceIndex($"DAX IQ RX {channel}");
     }
 
     public IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllSignalDevices()

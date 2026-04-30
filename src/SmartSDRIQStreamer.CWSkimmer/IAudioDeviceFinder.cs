@@ -45,4 +45,17 @@ public interface IAudioDeviceFinder
     /// Used for diagnostics and logging.
     /// </summary>
     IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllAudioDevices();
+
+    /// <summary>
+    /// Finds the DAX IQ capture device for the given 1-based channel number,
+    /// probing DAX v2 naming first ("DAX IQ {N}", SmartSDR 4.2.x) then DAX v1
+    /// ("DAX IQ RX {N}", SmartSDR 4.1.x).
+    ///
+    /// Returns the 1-based UI display number (WinMM index + 1), matching what
+    /// CW Skimmer shows in its Audio tab dropdown.  To write to a CW Skimmer INI
+    /// file, subtract 1: INI value = WinMM index = UI display number - 1.
+    ///
+    /// Returns -1 if no matching device is found for either naming convention.
+    /// </summary>
+    int FindDaxIqSignalDeviceIndex(int channel);
 }

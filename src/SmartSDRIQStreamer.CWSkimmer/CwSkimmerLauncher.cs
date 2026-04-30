@@ -75,22 +75,17 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     public (string SignalDevice, int SignalIdx, string AudioDevice, int AudioIdx)?
         PreviewDevices(int daxIqChannel)
     {
+        // Probe v2 ("DAX IQ {N}") then v1 ("DAX IQ RX {N}") to support both DAX versions.
+        int sigIdx = _deviceFinder.FindDaxIqSignalDeviceIndex(daxIqChannel);
+        if (sigIdx < 0) return null;
+
         var signalDevices = _deviceFinder.ListAllSignalDevices();
-        var audioDevices = _deviceFinder.ListAllAudioDevices();
-        string sigName = $"DAX IQ RX {daxIqChannel}";
-        string audName = $"DAX Audio RX {daxIqChannel}";
+        var sigEntry      = signalDevices.FirstOrDefault(d => d.CwSkimmerIndex == sigIdx);
+        string signalLabel = sigEntry.Name ?? $"DAX IQ {daxIqChannel}";
 
-        int sigIdx = _deviceFinder.FindSignalDeviceIndex(sigName);
-        int audIdx = _deviceFinder.FindAudioDeviceIndex(audName);
-        if (sigIdx < 0 && audIdx < 0) return null;
-
-        var sigEntry = signalDevices.FirstOrDefault(d => d.Name.StartsWith(sigName, StringComparison.OrdinalIgnoreCase));
-        var audEntry = audioDevices.FirstOrDefault(d => d.Name.StartsWith(audName, StringComparison.OrdinalIgnoreCase));
-
-        string signalLabel = sigEntry == default ? sigName : sigEntry.Name;
-        string audioLabel  = audEntry == default ? audName : audEntry.Name;
-
-        return (signalLabel, sigIdx, audioLabel, audIdx);
+        // Audio I/O is the user's local speakers/headphones configured in the master INI,
+        // not a DAX device — index and name are not resolvable here without the config path.
+        return (signalLabel, sigIdx, string.Empty, -1);
     }
 
     public async Task<LaunchResult> LaunchAsync(
@@ -108,11 +103,16 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         var iniPath = Path.Combine(IniDir, $"CwSkimmer-ch{daxIqChannel}.ini");
         var channelIniExists = File.Exists(iniPath);
 
-        LastDiagnostics = BuildDiagnostics(daxIqChannel, model, config.SkimmerIniPath, channelIniExists);
+        LastDiagnostics = BuildDiagnostics(daxIqChannel, model, config.SkimmerIniPath, channelIniExists, _deviceFinder);
         WriteDiagnosticLog(LastDiagnostics);
 
-        if (model.WdmSignalDevIndex < 0 || model.WdmAudioDevIndex < 0)
+        // Generated channel INIs always use MME — only MmeSignalDev gates launch.
+        if (model.MmeSignalDevIndex < 0)
+        {
+            EmitLauncherStatus(daxIqChannel,
+                $"Launch blocked: MME signal device for DAX IQ {daxIqChannel} not found in WinMM enumeration.");
             return LaunchResult.DeviceNotFound;
+        }
 
         if (!PrepareManagedIniFromTemplate(iniPath, config, out _))
             return LaunchResult.TemplateIniNotFound;
@@ -371,7 +371,8 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         int daxIqChannel,
         CwSkimmerIniModel model,
         string templateIniPath,
-        bool channelIniExists)
+        bool channelIniExists,
+        IAudioDeviceFinder deviceFinder)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"=== CW Skimmer Device Diagnostic  (DAX ch {daxIqChannel}) ===");
@@ -380,6 +381,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         sb.AppendLine("--- Calibration source ---");
         sb.AppendLine($"  Template INI = {templateIniPath}");
         sb.AppendLine($"  Channel INI exists = {channelIniExists}");
+        sb.AppendLine($"  UseWdm                = {model.UseWdm}");
         sb.AppendLine();
         sb.AppendLine("--- Selected for INI ---");
         sb.AppendLine($"  Baseline WdmSignalDev = {model.CalibrationBaseSignalIndex}");
@@ -388,8 +390,59 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         sb.AppendLine($"  WdmAudioDev           = {model.WdmAudioDevIndex}");
         sb.AppendLine($"  MmeSignalDev          = {model.MmeSignalDevIndex}");
         sb.AppendLine($"  MmeAudioDev           = {model.MmeAudioDevIndex}");
-        sb.AppendLine($"  SignalRate   = {model.SampleRateHz}");
-        sb.AppendLine($"  CenterFreq   = {model.CenterFreqHz}");
+        sb.AppendLine($"  SignalRate            = {model.SampleRateHz}");
+        sb.AppendLine($"  CenterFreq            = {model.CenterFreqHz}");
+        sb.AppendLine();
+        sb.AppendLine("--- WinMM WaveIn capture devices (UI 1-based, INI = UI - 1) ---");
+        try
+        {
+            foreach (var (idx, name) in deviceFinder.ListAllSignalDevices())
+                sb.AppendLine($"  [idx {idx,3}] {name}");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"  (enumeration failed: {ex.Message})");
+        }
+        sb.AppendLine();
+        sb.AppendLine("--- WinMM WaveOut playback devices (UI 1-based, INI = UI - 1) ---");
+        try
+        {
+            foreach (var (idx, name) in deviceFinder.ListAllAudioDevices())
+                sb.AppendLine($"  [idx {idx,3}] {name}");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"  (enumeration failed: {ex.Message})");
+        }
+        sb.AppendLine();
+        sb.AppendLine("--- DAX IQ channel resolution (UI 1-based) ---");
+        for (int ch = 1; ch <= 4; ch++)
+        {
+            var idx = deviceFinder.FindDaxIqSignalDeviceIndex(ch);
+            sb.AppendLine($"  ch {ch}: {(idx >= 0 ? $"UI idx {idx}" : "NOT FOUND")}");
+        }
+        sb.AppendLine();
+        sb.AppendLine("--- DirectSound capture devices (CW Skimmer WDM order; INI value = idx) ---");
+        try
+        {
+            foreach (var dev in DirectSoundProbe.EnumerateCaptureDevices())
+                sb.AppendLine($"  [idx {dev.Index,3}] {dev.Description}");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"  (enumeration failed: {ex.Message})");
+        }
+        sb.AppendLine();
+        sb.AppendLine("--- DirectSound output devices (CW Skimmer WDM order; INI value = idx) ---");
+        try
+        {
+            foreach (var dev in DirectSoundProbe.EnumerateOutputDevices())
+                sb.AppendLine($"  [idx {dev.Index,3}] {dev.Description}");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"  (enumeration failed: {ex.Message})");
+        }
         return sb.ToString();
     }
 

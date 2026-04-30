@@ -236,7 +236,7 @@ public partial class MainWindow : Window
 
         var message = new TextBlock
         {
-            Text = "Reset streamer channel INI files (ch1-ch4)?\n\nThis removes only generated channel INIs. Your manual CwSkimmer.ini baseline is not changed.\n\nAfter reset, run CW Skimmer manually and review the Audio tab. Ensure DAX IQ RX 1 and DAX Audio RX 1 are selected, then exit CW Skimmer to save calibration.",
+            Text = "Reset streamer channel INI files (ch1-ch4)?\n\nThis removes only generated channel INIs. Your manual CwSkimmer.ini baseline is not changed.\n\nAfter reset, run CW Skimmer manually and review the Audio tab. Set Soundcard Driver to MME (the only mode SmartStreamer4 currently supports reliably — WDM is experimental). Ensure DAX IQ 1 (FlexRadio DAX) is selected as Signal I/O, and your local speakers/headphones are selected as Audio I/O. Then exit CW Skimmer to save calibration. Channels 2-4 are auto-derived at launch — no per-channel calibration needed.",
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 420
         };

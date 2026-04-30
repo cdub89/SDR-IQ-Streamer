@@ -4,6 +4,7 @@ namespace SDRIQStreamer.CWSkimmer.Tests;
 
 /// <summary>
 /// Fake IAudioDeviceFinder for unit tests — no real audio hardware required.
+/// Uses Contains matching so tests can register full device names and query by prefix.
 /// </summary>
 internal sealed class FakeAudioDeviceFinder : IAudioDeviceFinder
 {
@@ -15,13 +16,13 @@ internal sealed class FakeAudioDeviceFinder : IAudioDeviceFinder
         Dictionary<string, int>? audioDevices = null)
     {
         _signalDevices = signalDevices;
-        _audioDevices = audioDevices ?? signalDevices;
+        _audioDevices  = audioDevices ?? signalDevices;
     }
 
     public int FindSignalDeviceIndex(string nameFragment)
     {
         foreach (var (key, idx) in _signalDevices)
-            if (key.Contains(nameFragment, StringComparison.OrdinalIgnoreCase))
+            if (key.StartsWith(nameFragment, StringComparison.OrdinalIgnoreCase))
                 return idx;
         return -1;
     }
@@ -29,9 +30,16 @@ internal sealed class FakeAudioDeviceFinder : IAudioDeviceFinder
     public int FindAudioDeviceIndex(string nameFragment)
     {
         foreach (var (key, idx) in _audioDevices)
-            if (key.Contains(nameFragment, StringComparison.OrdinalIgnoreCase))
+            if (key.StartsWith(nameFragment, StringComparison.OrdinalIgnoreCase))
                 return idx;
         return -1;
+    }
+
+    public int FindDaxIqSignalDeviceIndex(int channel)
+    {
+        int idx = FindSignalDeviceIndex($"DAX IQ {channel}");
+        if (idx >= 0) return idx;
+        return FindSignalDeviceIndex($"DAX IQ RX {channel}");
     }
 
     public IReadOnlyList<(int CwSkimmerIndex, string Name)> ListAllSignalDevices()
@@ -50,23 +58,25 @@ public sealed class CwSkimmerIniWriterTests
     };
 
     private static CwSkimmerIniModel MakeModel(
-        int wdmSignal    = 8,
-        int wdmAudio     = 14,
-        int mmeSignal    = 0,
-        int mmeAudio     = 0,
-        int sampleRate   = 48000,
-        long centerFreq  = 14_048_441L,
+        int  wdmSignal  = 8,
+        int  wdmAudio   = 14,
+        int  mmeSignal  = 0,
+        int  mmeAudio   = 0,
+        bool useWdm     = true,
+        int  sampleRate = 48000,
+        long centerFreq = 14_048_441L,
         CwSkimmerConfig? cfg = null)
         => new(
-            wdmSignal,
-            wdmAudio,
-            mmeSignal,
-            mmeAudio,
+            WdmSignalDevIndex:          wdmSignal,
+            WdmAudioDevIndex:           wdmAudio,
+            MmeSignalDevIndex:          mmeSignal,
+            MmeAudioDevIndex:           mmeAudio,
+            UseWdm:                     useWdm,
             CalibrationBaseSignalIndex: wdmSignal,
-            CalibrationBaseAudioIndex: wdmAudio,
-            sampleRate,
-            centerFreq,
-            cfg ?? DefaultConfig());
+            CalibrationBaseAudioIndex:  wdmAudio,
+            SampleRateHz:               sampleRate,
+            CenterFreqHz:               centerFreq,
+            Config:                     cfg ?? DefaultConfig());
 
     // ── [Audio] section ───────────────────────────────────────────────────────
 
@@ -126,8 +136,8 @@ public sealed class CwSkimmerIniWriterTests
     [Fact]
     public void Write_SectionOrder_AudioBeforeTelnet()
     {
-        var text  = WriteToString(MakeModel());
-        int audio = text.IndexOf("[Audio]", StringComparison.Ordinal);
+        var text   = WriteToString(MakeModel());
+        int audio  = text.IndexOf("[Audio]",  StringComparison.Ordinal);
         int telnet = text.IndexOf("[Telnet]", StringComparison.Ordinal);
 
         Assert.True(audio < telnet, "[Audio] should precede [Telnet]");
@@ -160,19 +170,19 @@ WdmAudioDev=2
             writer.Write(MakeModel(), path);
             var text = File.ReadAllText(path);
 
-            Assert.Contains("[Windows]", text);
-            Assert.Contains("Left=418", text);
-            Assert.Contains("Top=601", text);
-            Assert.Contains("Width=546", text);
-            Assert.Contains("Height=416", text);
+            Assert.Contains("[Windows]",      text);
+            Assert.Contains("Left=418",       text);
+            Assert.Contains("Top=601",        text);
+            Assert.Contains("Width=546",      text);
+            Assert.Contains("Height=416",     text);
 
-            Assert.Contains("[Recorder]", text);
-            Assert.Contains("WavCall=OLDCALL", text);
+            Assert.Contains("[Recorder]",     text);
+            Assert.Contains("WavCall=OLDCALL",  text);
             Assert.Contains("WavOper=Old Name", text);
 
-            Assert.Contains("WdmSignalDev=8", text);
-            Assert.Contains("WdmAudioDev=14", text);
-            Assert.DoesNotContain("[sdrSR]", text);
+            Assert.Contains("WdmSignalDev=8",  text);
+            Assert.Contains("WdmAudioDev=14",  text);
+            Assert.DoesNotContain("[sdrSR]",   text);
         }
         finally
         {
@@ -232,10 +242,10 @@ public sealed class CwSkimmerTelnetClientTests
 
         Assert.NotNull(spot);
         Assert.Equal(14015.3, spot!.FrequencyKhz, 3);
-        Assert.Equal("9A3B", spot.Callsign);
+        Assert.Equal("9A3B",   spot.Callsign);
         Assert.Equal("K1ABC-#", spot.Spotter);
-        Assert.Equal(19, spot.SignalDb);
-        Assert.Equal(25, spot.SpeedWpm);
+        Assert.Equal(19,  spot.SignalDb);
+        Assert.Equal(25,  spot.SpeedWpm);
         Assert.Equal("19 dB 25 WPM CQ 1534Z", spot.Comment);
     }
 
@@ -259,8 +269,8 @@ public sealed class CwSkimmerTelnetClientTests
         var spot = CwSkimmerTelnetClient.ParseDxSpot(line);
 
         Assert.NotNull(spot);
-        Assert.Equal(14015.3, spot!.FrequencyKhz, 3);
-        Assert.Equal("9A3B", spot.Callsign);
+        Assert.Equal(14015.3,  spot!.FrequencyKhz, 3);
+        Assert.Equal("9A3B",   spot.Callsign);
         Assert.Equal("N0CALL-#", spot.Spotter);
         Assert.Equal(19, spot.SignalDb);
         Assert.Equal(25, spot.SpeedWpm);
@@ -278,13 +288,115 @@ public sealed class CwSkimmerTelnetClientTests
 
 public sealed class CwSkimmerIniModelFactoryTests
 {
-    [Fact]
-    public void Build_DerivesChannelOneFromManualBaselineIni()
+    // DAX v2 device set: UI indices (1-based) are non-sequential due to interleaved
+    // DAX RX and non-DAX devices — exactly the scenario the new design must handle.
+    // IQ 1 → UI 13, IQ 2 → UI 16, IQ 3 → UI 19, IQ 4 → UI 22 (gaps of 3).
+    private static FakeAudioDeviceFinder DaxV2Finder() => new(new Dictionary<string, int>
+    {
+        { "DAX IQ 1 (FlexRadio DAX)", 13 },
+        { "DAX IQ 2 (FlexRadio DAX)", 16 },
+        { "DAX IQ 3 (FlexRadio DAX)", 19 },
+        { "DAX IQ 4 (FlexRadio DAX)", 22 },
+    });
+
+    // DAX v1 device set: "RX" in name, different vendor suffix.
+    // IQ 1 → UI 8, IQ 2 → UI 11, IQ 3 → UI 14, IQ 4 → UI 17 (gaps of 3).
+    private static FakeAudioDeviceFinder DaxV1Finder() => new(new Dictionary<string, int>
+    {
+        { "DAX IQ RX 1 (FlexRadio Systems DAX IQ)", 8  },
+        { "DAX IQ RX 2 (FlexRadio Systems DAX IQ)", 11 },
+        { "DAX IQ RX 3 (FlexRadio Systems DAX IQ)", 14 },
+        { "DAX IQ RX 4 (FlexRadio Systems DAX IQ)", 17 },
+    });
+
+    // Empty finder — simulates WinMM enumeration finding nothing.
+    private static FakeAudioDeviceFinder EmptyFinder() => new(new Dictionary<string, int>());
+
+    private static string WriteIni(string content)
     {
         var path = Path.GetTempFileName();
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    // ── MME-only auto-derivation: direct per-channel WinMM name lookup ───────
+
+    [Fact]
+    public void Build_Channel1_DaxV2_UsesRuntimeWinMMLookup()
+    {
+        var path = WriteIni("""
+[Audio]
+WdmSignalDev=19
+WdmAudioDev=14
+MmeSignalDev=12
+MmeAudioDev=0
+UseWdm=1
+""");
         try
         {
-            File.WriteAllText(path, """
+            var factory = new CwSkimmerIniModelFactory(DaxV2Finder());
+            var model   = factory.Build(1, 48000, 14_048_441L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            // UI 13 → INI 12
+            Assert.Equal(12, model.MmeSignalDevIndex);
+            Assert.Equal(0,  model.MmeAudioDevIndex);   // copied verbatim from master
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Build_Channel2_DaxV2_LooksUpEachChannelIndependently()
+    {
+        var path = WriteIni("""
+[Audio]
+WdmSignalDev=19
+WdmAudioDev=14
+MmeSignalDev=12
+MmeAudioDev=0
+UseWdm=1
+""");
+        try
+        {
+            var factory = new CwSkimmerIniModelFactory(DaxV2Finder());
+            var model   = factory.Build(2, 48000, 7_040_000L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            // UI 16 → INI 15. Lookup is by name, not by offset from IQ1.
+            Assert.Equal(15, model.MmeSignalDevIndex);
+            Assert.Equal(0,  model.MmeAudioDevIndex);   // copied verbatim — no per-channel offset
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Build_Channel4_DaxV2_LooksUpFourthChannelByName()
+    {
+        var path = WriteIni("""
+[Audio]
+WdmSignalDev=19
+WdmAudioDev=14
+MmeSignalDev=12
+MmeAudioDev=0
+UseWdm=1
+""");
+        try
+        {
+            var factory = new CwSkimmerIniModelFactory(DaxV2Finder());
+            var model   = factory.Build(4, 48000, 3_540_000L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            // UI 22 → INI 21
+            Assert.Equal(21, model.MmeSignalDevIndex);
+            Assert.Equal(0,  model.MmeAudioDevIndex);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ── DAX v1 backwards compatibility ────────────────────────────────────────
+
+    [Fact]
+    public void Build_Channel1_DaxV1_ResolvesRxPattern()
+    {
+        // v1 device names contain "RX" — v2 probe finds nothing, v1 probe succeeds.
+        var path = WriteIni("""
 [Audio]
 WdmSignalDev=7
 WdmAudioDev=14
@@ -292,32 +404,21 @@ MmeSignalDev=7
 MmeAudioDev=0
 UseWdm=1
 """);
-
-            var cfg = new CwSkimmerConfig { SkimmerIniPath = path };
-            var factory = new CwSkimmerIniModelFactory();
-            var model = factory.Build(daxIqChannel: 1, sampleRateHz: 48000,
-                                      centerFreqHz: 14_048_441L, config: cfg);
-
-            Assert.Equal(7, model.WdmSignalDevIndex);
-            Assert.Equal(14, model.WdmAudioDevIndex);
-            Assert.Equal(7, model.MmeSignalDevIndex);
-            Assert.Equal(0, model.MmeAudioDevIndex);
-            Assert.Equal(48000, model.SampleRateHz);
-            Assert.Equal(14_048_441L, model.CenterFreqHz);
-        }
-        finally
+        try
         {
-            File.Delete(path);
+            var factory = new CwSkimmerIniModelFactory(DaxV1Finder());
+            var model   = factory.Build(1, 48000, 14_048_441L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            // UI 8 → INI 7
+            Assert.Equal(7, model.MmeSignalDevIndex);
         }
+        finally { File.Delete(path); }
     }
 
     [Fact]
-    public void Build_Channel2_UsesOffsetFromCalibrationBaseline()
+    public void Build_Channel3_DaxV1_LooksUpRxPatternByChannel()
     {
-        var path = Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(path, """
+        var path = WriteIni("""
 [Audio]
 WdmSignalDev=7
 WdmAudioDev=14
@@ -325,35 +426,104 @@ MmeSignalDev=7
 MmeAudioDev=0
 UseWdm=1
 """);
-
-            var cfg = new CwSkimmerConfig { SkimmerIniPath = path };
-            var factory = new CwSkimmerIniModelFactory();
-            var model = factory.Build(daxIqChannel: 2, sampleRateHz: 48000,
-                                      centerFreqHz: 7_040_000L, config: cfg);
-
-            Assert.Equal(8, model.WdmSignalDevIndex);
-            Assert.Equal(15, model.WdmAudioDevIndex);
-            Assert.Equal(7, model.MmeSignalDevIndex);
-            Assert.Equal(0, model.MmeAudioDevIndex);
-        }
-        finally
+        try
         {
-            File.Delete(path);
+            var factory = new CwSkimmerIniModelFactory(DaxV1Finder());
+            var model   = factory.Build(3, 48000, 7_040_000L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            // UI 14 → INI 13
+            Assert.Equal(13, model.MmeSignalDevIndex);
         }
+        finally { File.Delete(path); }
     }
+
+    // ── Generated INIs always force MME mode ──────────────────────────────────
+
+    [Fact]
+    public void Build_AlwaysForcesUseWdmFalse_RegardlessOfMasterIniSetting()
+    {
+        // Master has UseWdm=1. Generated channel INI must still force MME because
+        // CW Skimmer's WDM enumeration is opaque and unreliable.
+        var path = WriteIni("""
+[Audio]
+WdmSignalDev=3
+WdmAudioDev=15
+MmeSignalDev=8
+MmeAudioDev=3
+UseWdm=1
+""");
+        try
+        {
+            var factory = new CwSkimmerIniModelFactory(DaxV2Finder());
+            var model   = factory.Build(2, 48000, 7_040_000L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            Assert.False(model.UseWdm);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Build_PropagatesWdmFieldsVerbatimFromMaster_WithoutPerChannelOffset()
+    {
+        // WDM fields are inert when UseWdm=false, but we propagate them so the
+        // operator can still inspect or hand-edit them later.
+        var path = WriteIni("""
+[Audio]
+WdmSignalDev=3
+WdmAudioDev=15
+MmeSignalDev=8
+MmeAudioDev=3
+UseWdm=1
+""");
+        try
+        {
+            var factory = new CwSkimmerIniModelFactory(DaxV2Finder());
+            var model   = factory.Build(2, 48000, 7_040_000L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            Assert.Equal(3,  model.WdmSignalDevIndex);    // verbatim — no offset
+            Assert.Equal(15, model.WdmAudioDevIndex);     // verbatim — no offset
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ── Fallback and error cases ──────────────────────────────────────────────
 
     [Fact]
     public void Build_ReturnsNegativeOne_WhenCalibrationIniMissing()
     {
-        var factory = new CwSkimmerIniModelFactory();
-        var model = factory.Build(
-            1,
-            48000,
-            14_000_000L,
-            new CwSkimmerConfig { SkimmerIniPath = @"C:\does-not-exist\cwskimmer.ini" });
+        var factory = new CwSkimmerIniModelFactory(DaxV2Finder());
+        var model   = factory.Build(1, 48000, 14_000_000L,
+                          new CwSkimmerConfig { SkimmerIniPath = @"C:\does-not-exist\cwskimmer.ini" });
 
         Assert.Equal(-1, model.WdmSignalDevIndex);
         Assert.Equal(-1, model.WdmAudioDevIndex);
+        Assert.Equal(-1, model.MmeSignalDevIndex);
+        Assert.False(model.UseWdm);
+    }
+
+    [Fact]
+    public void Build_Channel2_FallsBackToSequentialOffset_WhenWinMMLookupFails()
+    {
+        // EmptyFinder returns -1 for all lookups → sequential fallback uses
+        // the master's MmeSignalDev as the IQ1 anchor and offsets by (channel - 1).
+        var path = WriteIni("""
+[Audio]
+WdmSignalDev=7
+WdmAudioDev=14
+MmeSignalDev=7
+MmeAudioDev=0
+UseWdm=1
+""");
+        try
+        {
+            var factory = new CwSkimmerIniModelFactory(EmptyFinder());
+            var model   = factory.Build(2, 48000, 7_040_000L, new CwSkimmerConfig { SkimmerIniPath = path });
+
+            Assert.Equal(8,  model.MmeSignalDevIndex);   // 7 + (2-1) sequential fallback
+            Assert.Equal(7,  model.WdmSignalDevIndex);   // verbatim from master
+            Assert.Equal(14, model.WdmAudioDevIndex);    // verbatim from master
+        }
+        finally { File.Delete(path); }
     }
 }
 
@@ -363,11 +533,11 @@ public sealed class FrequencyMathTests
     [InlineData(14.055090, 100, 14.055100)]
     [InlineData(14.055010, 100, 14.055000)]
     [InlineData(14.055490, 100, 14.055500)]
-    [InlineData(14.055090, 50, 14.055100)]
-    [InlineData(14.055010, 50, 14.055000)]
-    [InlineData(14.055025, 50, 14.055050)]
-    [InlineData(7.025149, 100, 7.025100)]
-    [InlineData(7.025150, 100, 7.025200)]
+    [InlineData(14.055090, 50,  14.055100)]
+    [InlineData(14.055010, 50,  14.055000)]
+    [InlineData(14.055025, 50,  14.055050)]
+    [InlineData(7.025149,  100, 7.025100)]
+    [InlineData(7.025150,  100, 7.025200)]
     public void SnapMHzToStepHz_RoundsToNearestStep(double inputMHz, int stepHz, double expectedMHz)
     {
         var result = FrequencyMath.SnapMHzToStepHz(inputMHz, stepHz);

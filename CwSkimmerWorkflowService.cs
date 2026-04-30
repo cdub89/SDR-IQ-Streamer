@@ -100,13 +100,13 @@ public sealed class CwSkimmerWorkflowService
     {
         var diag = _launcher.LastDiagnostics;
         if (string.IsNullOrEmpty(diag))
-            return $"DAX IQ RX {channel} audio device not found.";
+            return $"DAX IQ {channel} audio device not found.";
 
         var lines = diag.Split('\n')
             .SkipWhile(l => !l.Contains("WinMM WaveIn"))
             .Take(12)
             .ToArray();
-        return $"DAX IQ RX {channel} not found in WinMM list:\n{string.Join("\n", lines)}\n" +
+        return $"DAX IQ {channel} not found in WinMM list:\n{string.Join("\n", lines)}\n" +
                "(Full log: artifacts\\cwskimmer\\ini\\device-diagnostic.txt)";
     }
 

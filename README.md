@@ -12,7 +12,7 @@ License: MIT (see `LICENSE`).
 
 - Launch `SmartStreamer4.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
 - Click the streamer's `Config` tab and set the local path to `CwSkimmer.exe` and the associated INI file.
-- Before first streamer launch on a machine, run CW Skimmer manually and configure the `Audio` tab: set **Signal I/O Device** to `DAX IQ 1 (FlexRadio DAX)` (MME — recommended for SmartSDR 4.2.x) or `DAX IQ 1` (WDM), and set **Audio I/O Device** to any local audio output (not a DAX device). Exit CW Skimmer to save `CwSkimmer.ini`.
+- Before first streamer launch on a machine, run CW Skimmer manually and configure the `Audio` tab: set **Soundcard Driver** to **MME** (the only mode SmartStreamer4 currently supports reliably for multi-channel — WDM is experimental, see notes below), set **Signal I/O Device** to `DAX IQ 1 (FlexRadio DAX)`, and set **Audio I/O Device** to any local audio output (not a DAX device). Exit CW Skimmer to save `CwSkimmer.ini`.
 - In the `Operating` tab, click the radio and press **Connect**. After a few seconds you should see the available slices and IQ streams needed to launch CW Skimmer.
 - Once CW Skimmer is running, view settings and verify the `Radio`, `Audio`, and `Operator` tabs are correct for your station.
 - Click **Start** in the CW Skimmer toolbar to begin decoding.
@@ -44,9 +44,11 @@ License: MIT (see `LICENSE`).
 ## 5) CW Skimmer Integration Approach
 
 - Build channel-specific managed INI files from a user-selected template.
-- Device mapping model is machine-local calibration:
-  - operator calibrates manual `CwSkimmer.ini` for channel 1 (Signal I/O: `DAX IQ 1 (FlexRadio DAX)` on MME, recommended for SmartSDR 4.2.x; or `DAX IQ 1` on WDM; Audio I/O: any local audio output),
-  - streamer derives channel `N` WDM indices by offset from that baseline on first channel-INI creation.
+- Device mapping model is **MME-only auto-derivation**:
+  - operator calibrates the manual `CwSkimmer.ini` once with **Soundcard Driver = MME**, **Signal I/O = `DAX IQ 1 (FlexRadio DAX)`**, and **Audio I/O** = any local audio output,
+  - streamer resolves each channel's `MmeSignalDev` independently at launch by looking up `DAX IQ {N}` in the live WinMM enumeration — no per-channel offset, no calibration anchor required for ch 2-4,
+  - generated channel INIs always set `UseWdm=0` regardless of the master INI setting, because CW Skimmer's WDM device list uses an opaque kernel-streaming enumeration that cannot be replicated programmatically (see issue #19).
+- **WDM is experimental**: if a user chooses to operate in WDM mode they must launch each channel manually once, manually pick the correct device in CW Skimmer's Audio tab, and exit to save the per-channel INI. The streamer cannot auto-derive WDM indices for ch 2-4.
 - If operator corrects channel device selections in CW Skimmer and exits, streamer preserves existing channel INI `[Audio]` values on later launches.
 - Launch CW Skimmer per DAX-IQ channel and connect a Telnet client.
 - Runtime sync model:

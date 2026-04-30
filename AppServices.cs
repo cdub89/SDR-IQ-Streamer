@@ -26,7 +26,7 @@ public sealed class AppServices
         DeviceFinder = new WdmAudioDeviceFinder();
         ReleaseUpdateService = new ReleaseUpdateService();
 
-        var modelFactory = new CwSkimmerIniModelFactory();
+        var modelFactory = new CwSkimmerIniModelFactory(DeviceFinder);
         var iniWriter = new CwSkimmerIniWriter();
         Launcher = new CwSkimmerLauncher(modelFactory, iniWriter, DeviceFinder, () => new CwSkimmerTelnetClient());
     }

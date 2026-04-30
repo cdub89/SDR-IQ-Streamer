@@ -79,20 +79,18 @@ Use this section while running CW Skimmer standalone.
 
 SmartSDR 4.x exposes the DAX IQ stream as a standard audio device. Configure as follows:
 
-- **Soundcard Driver**: **MME is recommended for SmartSDR 4.2.x.** Testing on SmartSDR 4.2.x shows MME produces a more stable waterfall and better decode rates than WDM on at least some machines. WDM also works but your results may vary.
-- **Signal I/O Device**:
-  - MME: select `DAX IQ 1 (FlexRadio DAX)`
-  - WDM: select `DAX IQ 1`
+- **Soundcard Driver**: **MME — required for multi-channel auto-derivation.** SmartStreamer4 only reliably supports MME today; it auto-derives the correct `MmeSignalDev` for each DAX-IQ channel by looking up `DAX IQ {N}` in the live WinMM enumeration. WDM is **experimental** because CW Skimmer's WDM device dropdown uses an opaque ordering that cannot be replicated programmatically (see [issue #19](https://github.com/cdub89/SDR-IQ-Streamer/issues/19)). If you choose WDM, only the calibrated baseline channel will work; channels 2-4 must each be launched manually once in CW Skimmer with their device picked by hand and saved.
+- **Signal I/O Device** (MME): select `DAX IQ 1 (FlexRadio DAX)`. Channels 2-4 are resolved automatically at launch — do not change this for the master INI.
 - **Audio I/O Device**: select any local audio output (e.g. `Realtek HD Audio output`). No DAX Audio RX device is needed or available here — this slot is for CW Skimmer's local audio monitoring only.
 - **Channels**: `Left/Right = I / Q`
 - **Shift Right Channel Data by**: `0 samples`
 
 Confirm input levels are active and stable (not clipping, not flatline) after connecting.
 
-MME (recommended for SmartSDR 4.2.x):
+MME (supported, recommended):
 ![CW Skimmer Audio tab - MME](Assets/SetupWizard/MME IQ Setting.png)
 
-WDM:
+WDM (experimental — single-channel only without manual per-channel calibration):
 ![CW Skimmer Audio tab - WDM](Assets/SetupWizard/WDM IQ Setting.png)
 
 ### Operator tab
