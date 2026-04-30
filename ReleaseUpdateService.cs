@@ -24,7 +24,7 @@ public sealed record ReleaseCheckResult(
 
 public sealed class ReleaseUpdateService : IReleaseUpdateService
 {
-    private const string ReleasesApiUrl = "https://api.github.com/repos/cdub89/SDR-IQ-Streamer/releases?per_page=10";
+    private const string ReleasesApiUrl = "https://api.github.com/repos/cdub89/SmartStreamer4/releases?per_page=10";
     private static readonly HttpClient s_httpClient = BuildHttpClient();
 
     public async Task<ReleaseCheckResult> CheckForUpdateAsync(string currentTag, CancellationToken ct = default)
@@ -146,7 +146,7 @@ public sealed class ReleaseUpdateService : IReleaseUpdateService
         {
             Timeout = TimeSpan.FromSeconds(8)
         };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SmartStreamer4/1.0 (+https://github.com/cdub89/SDR-IQ-Streamer)");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("SmartStreamer4/1.0 (+https://github.com/cdub89/SmartStreamer4)");
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
     }

@@ -196,7 +196,7 @@ public partial class MainWindow : Window
 
     private void OnOpenSupport(object? sender, RoutedEventArgs e)
     {
-        const string issuesUrl = "https://github.com/cdub89/SDR-IQ-Streamer/issues";
+        const string issuesUrl = "https://github.com/cdub89/SmartStreamer4/issues";
         try
         {
             Process.Start(new ProcessStartInfo
