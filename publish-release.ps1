@@ -42,4 +42,14 @@ if (Test-Path $dllConfigPath) {
 Write-Host "`nPublish output:" -ForegroundColor Green
 Get-ChildItem $publishDir | Sort-Object Name | Format-Table Name, Length, LastWriteTime -AutoSize
 
+$exeName = "SmartStreamer4.exe"
+$exePath = Join-Path $publishDir $exeName
+$hash = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLower()
+$version = ([xml](Get-Content $projectPath)).Project.PropertyGroup.Version
+$assetLabel = "SmartStreamer4-v${version}-$Runtime.exe"
+
+Write-Host "`nSHA256: $hash  $assetLabel" -ForegroundColor Cyan
+Write-Host "`nNext: bump SHA256SUMS.txt, commit release assets, then publish to GitHub:" -ForegroundColor Yellow
+Write-Host "  gh release create v$version `"$exePath#$assetLabel`" --title `"SmartStreamer4 v$version`" --notes `"...`" --latest" -ForegroundColor White
+
 Write-Host "`nDone." -ForegroundColor Green

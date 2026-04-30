@@ -90,10 +90,32 @@ dotnet build -c Release
 ### Release Packaging
 
 ```powershell
+# 1. Bump <Version> in SmartSDRIQStreamer.csproj
+
+# 2. Build the release exe (script prints the SHA256 and gh command at the end)
 powershell -ExecutionPolicy Bypass -File .\publish-release.ps1 -Configuration Release -Runtime win-x64
+
+# 3. Add the SHA256 line printed by the script to artifacts/release/SHA256SUMS.txt
+
+# 4. Commit release assets
+git add SmartSDRIQStreamer.csproj
+git add -f artifacts/release/SHA256SUMS.txt
+git commit -m "Prepare v<version> beta release assets."
+
+# 5. Push and tag
+git push origin main
+git tag v<version>
+git push origin v<version>
+
+# 6. Create the GitHub release — use --latest, NOT --prerelease
+gh release create v<version> \
+  "bin\Release\net8.0-windows\win-x64\publish\SmartStreamer4.exe#SmartStreamer4-v<version>-win-x64.exe" \
+  --title "SmartStreamer4 v<version>" \
+  --notes "..." \
+  --latest
 ```
 
-- Publish GitHub releases with attached binaries (`SmartStreamer4-v<version>-win-x64.zip`) and checksum asset (`SHA256SUMS.txt`).
+> **Note:** Always use `--latest` (never `--prerelease`) so the new release becomes the default download on the GitHub releases page.
 
 ### Tests
 
