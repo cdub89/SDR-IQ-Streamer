@@ -38,7 +38,10 @@
             <TabItem.Header>
                 <TextBlock Text="Operating" FontSize="11" FontWeight="Bold"/>
             </TabItem.Header>
-            <StackPanel Margin="8" Spacing="4">
+            <ScrollViewer Margin="0,8,0,8"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="8,0,8,0" Spacing="4">
                     <TextBlock Text="{Binding StatusText}"
                                FontSize="12" Foreground="Gray"
                                IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
@@ -195,13 +198,17 @@
                     </Border>
 
             </StackPanel>
+            </ScrollViewer>
         </TabItem>
 
         <TabItem>
             <TabItem.Header>
                 <TextBlock Text="Config" FontSize="11" FontWeight="Bold"/>
             </TabItem.Header>
-            <DockPanel Margin="8" LastChildFill="True">
+            <ScrollViewer Margin="0,8,0,8"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+            <DockPanel Margin="8,0,8,0" LastChildFill="True">
                     <DockPanel.Styles>
                         <Style Selector="TextBox.config-entry">
                             <Setter Property="Height" Value="20"/>
@@ -373,6 +380,7 @@
                     </StackPanel>
 
             </DockPanel>
+            </ScrollViewer>
         </TabItem>
 
         <TabItem>

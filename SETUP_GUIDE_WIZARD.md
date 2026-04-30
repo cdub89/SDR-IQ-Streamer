@@ -188,7 +188,17 @@ If radio is disconnected from streamer, streamer should also stop active skimmer
 - Save, close, and relaunch through streamer.
 - For first-time channel setup, remove only the affected `CwSkimmer-chN.ini` and relaunch.
 
-> **After upgrades:** Channel-specific INI files (`CwSkimmer-chN.ini`) are created once from the master INI and then preserved across launches to protect your settings. This means changes to the master INI — such as switching between WDM and MME, or adjusting audio device selections — are **not** automatically picked up by existing channel files. After an upgrade or after changing audio driver settings in the master INI, use the **Reset Channel INIs** button in the streamer to delete the generated channel files. The next launch will re-seed them from the current master INI.
+> **When to Reset Channel INIs:** Channel-specific INI files (`CwSkimmer-chN.ini`) are seeded once from the master INI and preserved across launches to protect your settings. Most upgrades do **not** require a reset — the streamer rewrites the `[Audio]` and `[Telnet]` sections on every launch.
+>
+> Click `Config` → `Streamer INI Files` → **Reset** when:
+> - You changed **Soundcard Driver** (MME ↔ WDM) in the master INI.
+> - You changed **Signal I/O** or **Audio I/O** device selection in the master INI.
+> - A beta release explicitly notes an INI schema change.
+> - CW Skimmer hangs on launch after upgrade and other causes are ruled out.
+>
+> The Reset button is disabled while CW Skimmer is running, and only deletes generated channel files — your manual `CwSkimmer.ini` baseline is untouched. The next launch re-seeds the channel files from the current master INI.
+>
+> **Logs are separate** and not affected by Reset. They are append-only diagnostic data under `artifacts/logs/`; if disk usage is a concern, delete them manually.
 
 ### C) Settings not retained as expected
 

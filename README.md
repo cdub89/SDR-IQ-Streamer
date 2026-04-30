@@ -18,6 +18,21 @@ License: MIT (see `LICENSE`).
 - Click **Start** in the CW Skimmer toolbar to begin decoding.
 - Finally, click the streamer's `Logs` tab to see real-time events from `[STREAMER]`, `[SKIMMER]`, and `[TELNET]` to verify connect, launch, and sync direction (VFO vs Skimmer click-tune).
 
+### When to Reset Channel INIs
+
+Generated channel INIs (`CwSkimmer-chN.ini`) are seeded once from the master INI and then preserved across launches to protect your settings. Most upgrades do **not** require a reset — the streamer rewrites the `[Audio]` and `[Telnet]` sections on every launch.
+
+Use `Config` → `Streamer INI Files` → **Reset** when:
+
+- You changed **Soundcard Driver** (MME ↔ WDM) in the master INI.
+- You changed **Signal I/O** or **Audio I/O** device selection in the master INI.
+- A beta release explicitly notes an INI schema change.
+- CW Skimmer hangs on launch after upgrade and other causes are ruled out.
+
+The Reset button is disabled while CW Skimmer is running, and only deletes generated channel files — your manual `CwSkimmer.ini` baseline is untouched.
+
+**Logs are separate** and not affected by Reset. They are append-only diagnostic data under `artifacts/logs/`; delete them manually if disk usage is a concern.
+
 ## 2) Technology Stack
 
 - UI: Avalonia (`net8.0-windows`)
