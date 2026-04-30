@@ -12,7 +12,7 @@ License: MIT (see `LICENSE`).
 
 - Launch `SmartStreamer4.exe`. If Windows prompts for firewall access, allow the app through Windows Firewall.
 - Click the streamer's `Config` tab and set the local path to `CwSkimmer.exe` and the associated INI file.
-- Before first streamer launch on a machine, run CW Skimmer manually and calibrate only `DAX IQ RX 1` + `DAX Audio RX 1`, then exit CW Skimmer to save `CwSkimmer.ini`.
+- Before first streamer launch on a machine, run CW Skimmer manually and configure the `Audio` tab: set **Signal I/O Device** to `DAX IQ 1 (FlexRadio DAX)` (MME — recommended for SmartSDR 4.2.x) or `DAX IQ 1` (WDM), and set **Audio I/O Device** to any local audio output (not a DAX device). Exit CW Skimmer to save `CwSkimmer.ini`.
 - In the `Operating` tab, click the radio and press **Connect**. After a few seconds you should see the available slices and IQ streams needed to launch CW Skimmer.
 - Once CW Skimmer is running, view settings and verify the `Radio`, `Audio`, and `Operator` tabs are correct for your station.
 - Click **Start** in the CW Skimmer toolbar to begin decoding.
