@@ -1,0 +1,259 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="SDRIQStreamer.App.ResetSkimmerWizardWindow"
+        Title="CW Skimmer Set Up Wizard"
+        Width="640"
+        Height="540"
+        WindowStartupLocation="CenterOwner"
+        MinWidth="560"
+        MinHeight="420"
+        CanResize="True">
+    <Window.Styles>
+        <Style Selector="TextBox.wizard-entry">
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="MinHeight" Value="22"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+    </Window.Styles>
+    <DockPanel LastChildFill="True">
+        <Border DockPanel.Dock="Top"
+                BorderBrush="#E3E6EA"
+                BorderThickness="0,0,0,1"
+                Padding="12,10">
+            <StackPanel Spacing="4">
+                <TextBlock x:Name="WizardTitleText"
+                           Text="Reset Channel INI"
+                           FontSize="16"
+                           FontWeight="SemiBold"/>
+                <TextBlock x:Name="WizardStepText"
+                           Text="Step 1 of 4"
+                           FontSize="11"
+                           Foreground="Gray"/>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom"
+                BorderBrush="#E3E6EA"
+                BorderThickness="0,1,0,0"
+                Padding="12,8">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
+                <Button x:Name="BackButton"
+                        Grid.Column="0"
+                        Content="Back"
+                        MinWidth="76"/>
+                <Button x:Name="NextButton"
+                        Grid.Column="1"
+                        Content="Next"
+                        MinWidth="120"/>
+                <Button x:Name="CancelButton"
+                        Grid.Column="3"
+                        Content="Cancel"
+                        MinWidth="76"/>
+            </Grid>
+        </Border>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <Grid Margin="14">
+                <!-- Step 1: Window placement + launch -->
+                <StackPanel x:Name="Step1Panel" Spacing="8">
+                    <TextBlock Text="Step 1 - Set CW Skimmer Window Size and Position"
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12">
+                        Click the button below to launch CW Skimmer using your configured exe path.
+                        Drag and resize the CW Skimmer window to your preferred screen position.
+                        CW Skimmer saves its window geometry only when you close it normally with the
+                        X button - so leave the window open through Steps 2-4 and close it at the end.
+                    </TextBlock>
+                    <Button x:Name="LaunchSkimmerButton"
+                            Content="Launch CW Skimmer"
+                            HorizontalAlignment="Left"
+                            MinWidth="160"
+                            Padding="12,4"/>
+                    <TextBlock x:Name="LaunchStatusText"
+                               TextWrapping="Wrap"
+                               FontSize="11"
+                               Foreground="DarkSlateGray"/>
+                    <Image x:Name="StreamerAppImage"
+                           Stretch="Uniform"
+                           MaxWidth="320"
+                           HorizontalAlignment="Left"
+                           Margin="0,8,0,0"/>
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="11"
+                               Foreground="Gray"
+                               Margin="0,4,0,0"
+                               Text="See Help / Setup Guide for prerequisites and troubleshooting."/>
+                </StackPanel>
+
+                <!-- Step 2: Radio tab -->
+                <StackPanel x:Name="Step2Panel" Spacing="8" IsVisible="False">
+                    <TextBlock Text="Step 2 - Settings, Radio Tab"
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12">
+                        In CW Skimmer, open the Settings dialog (View / Settings menu) and select
+                        the Radio tab. Set the following values:
+                    </TextBlock>
+                    <StackPanel Margin="14,2,0,2" Spacing="2">
+                        <TextBlock Text="- Hardware Type: SoftRock"  FontSize="12"/>
+                        <TextBlock Text="- Sample Rate: 48000 Hz"    FontSize="12"/>
+                        <TextBlock Text="- Audio IF: 0 Hz"           FontSize="12"/>
+                        <TextBlock Text="- LO Frequency: ignore (or set to the DAX-IQ channel center frequency)" FontSize="12"/>
+                    </StackPanel>
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray">
+                        SmartStreamer4 rewrites the LO frequency on every launch from the live
+                        panadapter center, so the value you enter here is only used until the
+                        first launch.
+                    </TextBlock>
+                    <Image x:Name="RadioTabImage"
+                           Stretch="Uniform"
+                           MaxWidth="520"
+                           HorizontalAlignment="Left"
+                           Margin="0,6,0,0"/>
+                </StackPanel>
+
+                <!-- Step 3: Audio tab - capture indices -->
+                <StackPanel x:Name="Step3Panel" Spacing="8" IsVisible="False">
+                    <TextBlock Text="Step 3 - Settings, Audio Tab - Capture Device Numbers"
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12">
+                        On CW Skimmer's Audio tab, toggle the Soundcard Driver dropdown between
+                        MME and WDM. Each mode populates a different list in the Signal I/O Device
+                        dropdown directly below it - the screenshots further down show example
+                        lists. For each DAX-IQ channel, write down the position number of
+                        "DAX IQ N (FlexRadio DAX)" in BOTH the MME list and the WDM list
+                        (1 = first item, 2 = second, etc.). Numbers usually differ between modes
+                        and between PCs, which is why WDM auto-derivation isn't reliable.
+                    </TextBlock>
+
+                    <TextBlock Text="Soundcard Driver mode for SmartStreamer4 launches:"
+                               FontSize="12" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                    <StackPanel Orientation="Horizontal" Spacing="16">
+                        <RadioButton x:Name="DriverModeMmeRadio"
+                                     GroupName="SkimmerDriverMode"
+                                     Content="MME (recommended)"
+                                     IsChecked="True"
+                                     FontSize="12"/>
+                        <RadioButton x:Name="DriverModeWdmRadio"
+                                     GroupName="SkimmerDriverMode"
+                                     Content="WDM (experimental)"
+                                     FontSize="12"/>
+                    </StackPanel>
+
+                    <Border BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                        <Grid ColumnDefinitions="Auto,*,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="4" ColumnSpacing="10">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="MME #" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Left"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="WDM #" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Left"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="ch 1 (DAX IQ 1)" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBox  Grid.Row="1" Grid.Column="1" x:Name="Ch1MmeText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="1"/>
+                            <TextBox  Grid.Row="1" Grid.Column="2" x:Name="Ch1WdmText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="5"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="ch 2 (DAX IQ 2)" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBox  Grid.Row="2" Grid.Column="1" x:Name="Ch2MmeText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="2"/>
+                            <TextBox  Grid.Row="2" Grid.Column="2" x:Name="Ch2WdmText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="6"/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="ch 3 (DAX IQ 3)" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBox  Grid.Row="3" Grid.Column="1" x:Name="Ch3MmeText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="3"/>
+                            <TextBox  Grid.Row="3" Grid.Column="2" x:Name="Ch3WdmText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="7"/>
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="ch 4 (DAX IQ 4)" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBox  Grid.Row="4" Grid.Column="1" x:Name="Ch4MmeText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="4"/>
+                            <TextBox  Grid.Row="4" Grid.Column="2" x:Name="Ch4WdmText" Classes="wizard-entry" Width="80" HorizontalAlignment="Left" TabIndex="8"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray">
+                        Tab order walks all four MME boxes first (ch 1 to ch 4), then all four WDM
+                        boxes (ch 1 to ch 4). Leave a cell blank to use auto-derivation. The selected
+                        mode above decides which set is applied at launch; both sets are saved either
+                        way so you can flip mode later without re-entering numbers.
+                    </TextBlock>
+                    <TextBlock x:Name="Step3ValidationText"
+                               TextWrapping="Wrap"
+                               FontSize="11"
+                               Foreground="DarkRed"
+                               IsVisible="False"/>
+
+                    <TextBlock Text="MME Signal I/O dropdown (example - your numbers may differ)"
+                               FontSize="11" Foreground="Gray" Margin="0,12,0,0"/>
+                    <Image x:Name="MmeListImage"
+                           Stretch="Uniform"
+                           MaxWidth="520"
+                           HorizontalAlignment="Left"/>
+
+                    <TextBlock Text="WDM Signal I/O dropdown (example - your numbers may differ)"
+                               FontSize="11" Foreground="Gray" Margin="0,12,0,0"/>
+                    <Image x:Name="WdmListImage"
+                           Stretch="Uniform"
+                           MaxWidth="520"
+                           HorizontalAlignment="Left"/>
+                </StackPanel>
+
+                <!-- Step 4: Review and close -->
+                <StackPanel x:Name="Step4Panel" Spacing="8" IsVisible="False">
+                    <TextBlock Text="Step 4 - Review Other Tabs and Close CW Skimmer"
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="12">
+                        Quickly scan the remaining Settings tabs to confirm:
+                    </TextBlock>
+                    <StackPanel Margin="14,2,0,2" Spacing="2">
+                        <TextBlock Text="- Operator tab: callsign and operator info are correct" FontSize="12"/>
+                        <TextBlock Text="- Network tab: check ONLY these two boxes -" FontSize="12"/>
+                        <TextBlock Text="     - Enable Telnet Server" FontSize="12"/>
+                        <TextBlock Text="     - Allow SKIMMER Commands" FontSize="12"/>
+                        <TextBlock Text="     (leave the port number alone - SmartStreamer4 rewrites it on every launch)"
+                                   FontSize="11" Foreground="Gray"/>
+                        <TextBlock Text="- Misc tabs: any preferences you want preserved" FontSize="12"/>
+                    </StackPanel>
+                    <Border BorderBrush="DarkOrange" BorderThickness="2" CornerRadius="4"
+                            Background="#FFF4E0" Padding="10" Margin="0,8,0,0">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="!  Important - Close CW Skimmer Now"
+                                       FontSize="13" FontWeight="Bold" Foreground="#B25300"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#3A2A00">
+                                Close CW Skimmer using File / Exit, or click the X button on its
+                                window. This is the only way CW Skimmer saves your changes to its
+                                master INI. The wizard will not let you finish until CW Skimmer has
+                                been closed.
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                    <Border BorderBrush="#E3E6EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="When you click Reset and Done below:"
+                                       FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray">
+                                1. The MME and WDM device numbers you entered in Step 3 are saved.
+                                <LineBreak/>
+                                2. Any existing CwSkimmer-chN.ini files are deleted.
+                                <LineBreak/>
+                                3. On next launch, channel INIs are regenerated from your master INI
+                                using the saved per-channel device numbers.
+                                <LineBreak/>
+                                Your master cwskimmer.ini is not modified.
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock x:Name="Step4GateText"
+                               TextWrapping="Wrap"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="DarkRed"
+                               IsVisible="False"
+                               Margin="0,8,0,0"/>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

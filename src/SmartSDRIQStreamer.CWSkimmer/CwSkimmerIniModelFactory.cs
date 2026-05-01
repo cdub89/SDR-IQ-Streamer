@@ -52,20 +52,36 @@ public sealed class CwSkimmerIniModelFactory
                 Config:                     config);
         }
 
-        // MME signal: per-channel WinMM name lookup.
-        // FindDaxIqSignalDeviceIndex returns the 1-based UI display number;
-        // CW Skimmer INI stores 0-based, so subtract 1.
-        var uiMmeN = _deviceFinder.FindDaxIqSignalDeviceIndex(daxIqChannel);
-        var mmeSignal = uiMmeN >= 0
-            ? uiMmeN - 1                              // UI 1-based → INI 0-based
-            : mmeIQ1 + (daxIqChannel - 1);            // sequential fallback
+        // MME signal: operator override (1-based UI) wins; otherwise per-channel
+        // WinMM name lookup; otherwise sequential fallback. INI stores 0-based.
+        int mmeSignal;
+        if (config.OperatorMmeSignalDevIndex is int operatorMmeUi && operatorMmeUi > 0)
+        {
+            mmeSignal = operatorMmeUi - 1;
+        }
+        else
+        {
+            var uiMmeN = _deviceFinder.FindDaxIqSignalDeviceIndex(daxIqChannel);
+            mmeSignal = uiMmeN >= 0
+                ? uiMmeN - 1
+                : mmeIQ1 + (daxIqChannel - 1);
+        }
+
+        // WDM signal: when the operator supplies a 1-based UI index for this
+        // channel, write a WDM-mode INI with that index. This is the only
+        // reliable way to drive multi-channel WDM (see issue #19). When null,
+        // fall back to MME mode and copy the master WDM index inertly.
+        var useWdm = config.OperatorWdmSignalDevIndex is int operatorWdmUi && operatorWdmUi > 0;
+        var wdmSignal = useWdm
+            ? config.OperatorWdmSignalDevIndex!.Value - 1
+            : wdmIQ1;
 
         return new CwSkimmerIniModel(
-            WdmSignalDevIndex:          wdmIQ1,        // copied from master, inert (UseWdm=false)
-            WdmAudioDevIndex:           wdmAudio,      // copied from master, inert (UseWdm=false)
+            WdmSignalDevIndex:          wdmSignal,
+            WdmAudioDevIndex:           wdmAudio,      // copied from master verbatim
             MmeSignalDevIndex:          mmeSignal,
             MmeAudioDevIndex:           mmeAudio,
-            UseWdm:                     false,         // always MME for generated channel INIs
+            UseWdm:                     useWdm,
             CalibrationBaseSignalIndex: wdmIQ1,
             CalibrationBaseAudioIndex:  wdmAudio,
             SampleRateHz:               sampleRateHz,

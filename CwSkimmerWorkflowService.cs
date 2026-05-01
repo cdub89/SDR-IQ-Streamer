@@ -61,6 +61,8 @@ public sealed class CwSkimmerWorkflowService
             TelnetClusterEnabled = _settings.TelnetClusterEnabled,
             InitialSliceFreqMHz = slice?.FreqMHz ?? 0,
             InitialLoFreqHz = centerFreqHz,
+            OperatorMmeSignalDevIndex = IsWdmModeSelected() ? null : ResolveOperatorMmeIndex(stream.DAXIQChannel),
+            OperatorWdmSignalDevIndex = IsWdmModeSelected() ? ResolveOperatorWdmIndex(stream.DAXIQChannel) : null,
         };
         addStatus($"Launching CW Skimmer on ch {stream.DAXIQChannel} ({stream.SampleRate / 1000} kHz).");
 
@@ -109,6 +111,27 @@ public sealed class CwSkimmerWorkflowService
         return $"DAX IQ {channel} not found in WinMM list:\n{string.Join("\n", lines)}\n" +
                "(Full log: artifacts\\cwskimmer\\ini\\device-diagnostic.txt)";
     }
+
+    private bool IsWdmModeSelected() =>
+        string.Equals(_settings.SkimmerSoundcardDriverMode, "WDM", StringComparison.OrdinalIgnoreCase);
+
+    private int? ResolveOperatorMmeIndex(int daxIqChannel) => daxIqChannel switch
+    {
+        1 => _settings.MmeDeviceIndexCh1,
+        2 => _settings.MmeDeviceIndexCh2,
+        3 => _settings.MmeDeviceIndexCh3,
+        4 => _settings.MmeDeviceIndexCh4,
+        _ => null,
+    };
+
+    private int? ResolveOperatorWdmIndex(int daxIqChannel) => daxIqChannel switch
+    {
+        1 => _settings.WdmDeviceIndexCh1,
+        2 => _settings.WdmDeviceIndexCh2,
+        3 => _settings.WdmDeviceIndexCh3,
+        4 => _settings.WdmDeviceIndexCh4,
+        _ => null,
+    };
 
     private string ResolveTelnetCallsign()
     {

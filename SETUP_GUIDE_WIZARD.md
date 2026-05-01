@@ -1,6 +1,11 @@
-# SmartStreamer4 Setup Guide (Wizard Style)
+# SmartStreamer4 Setup Guide
 
-This guide walks through setup in a step-by-step flow, including CW Skimmer master INI preparation and operational troubleshooting.
+This guide is reference material - prerequisites, what each tab does, and a
+troubleshooting decision tree. For the hands-on first-time setup flow, click
+**Reset / Setup Wizard** on the Config tab (it auto-opens on first install
+once both CW Skimmer paths are set). The wizard launches CW Skimmer, walks
+the Settings tabs, and captures the per-PC MME and WDM device numbers needed
+for multi-channel operation.
 
 ---
 
@@ -27,98 +32,99 @@ If any item above is missing, stop and fix that first. Common issues include:
 
 ---
 
-## Step 1 - Prepare CW Skimmer Master INI (Standalone First)
+## About the Reset / Setup Wizard
 
-This is the most important setup step. The streamer uses your CW Skimmer master INI as the template source for first-time channel INI creation.
+The **Reset / Setup Wizard** (Config tab) is the recommended way to do
+first-time setup or reconfigure CW Skimmer for SmartStreamer4. It is *not*
+just a destructive cleanup — it is an interactive 4-step walkthrough that:
 
-1. Find the path to your CwSkimmer.exe and its associated `cwskimmer.ini`
-2. Launch `CwSkimmer.exe` manually (not from streamer).
-3. Recommendations on What to Choose will be covered in the next step.
-4. This will result in a known-good baseline should the streamer configuration ever need to be reset.
+1. Launches CW Skimmer with your configured exe path so you can size and
+   position the window where you want it.
+2. Guides you through the Settings → Radio tab values (SoftRock, 48 kHz,
+   Audio IF=0).
+3. Asks you to choose **MME (recommended)** vs **WDM (experimental)** as the
+   Soundcard Driver mode, then captures the per-channel device numbers shown
+   in CW Skimmer's Audio tab dropdowns. WDM dropdown ordering differs by PC,
+   so this manual capture is the only reliable way to drive multi-channel
+   WDM (see [issue #19](https://github.com/cdub89/SmartStreamer4/issues/19)).
+4. Verifies CW Skimmer is closed (so your settings actually save), then
+   deletes the per-channel INIs so they re-seed from your updated master.
 
-  
-If this master INI is wrong, streamer-launched sessions will inherit bad defaults. Always close CW Skimmer from its own window to ensure any settings you changed are reused next time CW Skimmer is run.
+Open the wizard when:
 
-Things that will be saved include the window size and position (geometry), along with the Radio, Audio and Network settings.
+- You are setting up SmartStreamer4 for the first time (it auto-opens once
+  both paths point to existing files).
+- You want to switch Soundcard Driver mode (MME ↔ WDM).
+- You moved to a different PC and the WDM device numbers changed.
+- A release explicitly notes a channel-INI schema change.
 
-  
-Typical Skimmer Exe Path:
+The wizard is harmless to re-run: it never modifies your master
+`cwskimmer.ini`, only the streamer-managed channel files.
+
+---
+
+## Step 1 - Paths and File Locations
+
+The wizard needs two paths set on the Config tab before it can launch
+CW Skimmer:
+
+Typical CwSkimmer.exe path:
 
 ```
 C:\Program Files (x86)\Afreet\CwSkimmer\CwSkimmer.exe
 ```
 
-  
-Typical Skimmer Ini config Path (replace user name as appropriate with your own config):
+Typical CwSkimmer.ini path (replace user name with your own):
 
 ```
 C:\Users\chris\AppData\Roaming\Afreet\Products\CwSkimmer\CwSkimmer.ini
 ```
 
-
+Use the Browse buttons on the Config tab to locate both. Once both point at
+existing files, the Reset / Setup Wizard auto-opens on first install.
 
 ---
 
-## Step 2 - CW Skimmer Tab Guidance (What to Choose)
+## Step 2 - What the Wizard Configures (Reference)
 
-Use this section while running CW Skimmer standalone.
+The wizard handles the Radio and Audio tabs end-to-end. This section is
+reference material if you are diagnosing what the wizard wrote.
 
-### Radio tab
+### Radio tab values the wizard sets
 
-- Confirm radio/source mode is correct for your operating workflow.
-- Verify frequency display behavior and tuning expectations are correct.
-- Save and verify reopen behavior.
-- Hardware Type should be SoftRock.
-- Sample Rate should be 48 kHz for most machines, and should match the SmartSDR DAX-IQ stream sample rate.
-- LO Frequency (Hz) should match the center frequency of the active IQ stream.
-- CW Pitch should match the pitch configured in SmartSDR.
+- Hardware Type: SoftRock
+- Sample Rate: 48000 Hz
+- Audio IF: 0 Hz
+- LO Frequency: rewritten on every launch from the live panadapter center.
 
 ![CW Skimmer Radio tab example](Assets/SetupWizard/image-8d3c7eef-09f5-4652-8c05-93bf3fe4a9bd.png)
 
-### Audio tab
+### Audio tab values
 
-SmartSDR 4.x exposes the DAX IQ stream as a standard audio device. Configure as follows:
-
-- **Soundcard Driver**: **MME — required for multi-channel auto-derivation.** SmartStreamer4 only reliably supports MME today; it auto-derives the correct `MmeSignalDev` for each DAX-IQ channel by looking up `DAX IQ {N}` in the live WinMM enumeration. WDM is **experimental** because CW Skimmer's WDM device dropdown uses an opaque ordering that cannot be replicated programmatically (see [issue #19](https://github.com/cdub89/SmartStreamer4/issues/19)). If you choose WDM, only the calibrated baseline channel will work; channels 2-4 must each be launched manually once in CW Skimmer with their device picked by hand and saved.
-- **Signal I/O Device** (MME): select `DAX IQ 1 (FlexRadio DAX)`. Channels 2-4 are resolved automatically at launch — do not change this for the master INI.
-- **Audio I/O Device**: select any local audio output (e.g. `Realtek HD Audio output`). No DAX Audio RX device is needed or available here — this slot is for CW Skimmer's local audio monitoring only.
+- **Soundcard Driver**: MME (recommended) or WDM (experimental). The wizard
+  asks the operator to pick.
+- **Signal I/O Device**: in MME mode, auto-derived by looking up
+  `DAX IQ {N}` in the live WinMM enumeration; in WDM mode, taken from the
+  per-channel numbers the operator captures in the wizard.
+- **Audio I/O Device**: copied verbatim from the master INI - this is your
+  local speakers/headphones, used only for CW Skimmer's local audio
+  monitoring.
 - **Channels**: `Left/Right = I / Q`
 - **Shift Right Channel Data by**: `0 samples`
 
-Confirm input levels are active and stable (not clipping, not flatline) after connecting.
+### Operator and Network tabs
 
-MME (supported, recommended):
-![CW Skimmer Audio tab - MME](Assets/SetupWizard/MME IQ Setting.png)
+These are not rewritten by the streamer (Network telnet port is the
+exception - it is rewritten on every launch). Set callsign and operator
+defaults manually inside CW Skimmer before closing.
 
-WDM (experimental — single-channel only without manual per-channel calibration):
-![CW Skimmer Audio tab - WDM](Assets/SetupWizard/WDM IQ Setting.png)
-
-### Operator tab
-
-- Set operator identity/callsign and any operator-level defaults.
-- Validate that operator info is preserved after close/reopen.
-
-### Network tab
-
-- Confirm telnet/network settings are valid for local operation.
-- Ensure port configuration does not conflict with other local services.
-- Validate settings persist after save and restart.
 ![CW Skimmer Network tab example](Assets/SetupWizard/image-6013668c-9a3b-4a87-a15d-5e9acfd2b129.png)
-
-After all tab settings are validated, save, set the CW Skimmer window size and position, then close CW Skimmer normally.
 
 ---
 
-## Step 3 - Configure Streamer Paths
+## Step 3 - Spot Persistence and Colors
 
-1. Launch `SmartStreamer4.exe`.
-2. Open the `Config` tab.
-3. Set:
-  - `CwSkimmer.exe` path
-  - master `cwskimmer.ini` path (from Step 1)
-4. Confirm paths are valid and point to real files.
-
-Spot persistence and colors:
+Configured on the Config tab independent of the wizard.
 
 - In `Config`, use `Persist` to control spot lifetime (seconds) for newly published spots.
 - Use `Txt` to choose spot text color and `Bg` to choose spot background color.
@@ -181,24 +187,24 @@ If radio is disconnected from streamer, streamer should also stop active skimmer
 - Recheck `CwSkimmer.exe` path in streamer `Config`.
 - Confirm DAX devices exist and are visible to CW Skimmer.
 - Check `artifacts/logs` and streamer `Logs` tab for launch diagnostics.
+- If CW Skimmer crashes within ~10 seconds with no message
+  (`exit_code=-1073740771` / `STATUS_FATAL_USER_CALLBACK_EXCEPTION` in the
+  logs), this is a known intermittent CW Skimmer startup fault. Click
+  `Start` again from SmartStreamer4 — it usually launches cleanly on the
+  second attempt.
 
 ### B) Wrong audio/input behavior after launch
 
-- Re-run CW Skimmer standalone and correct Audio tab settings in master INI.
-- Save, close, and relaunch through streamer.
-- For first-time channel setup, remove only the affected `CwSkimmer-chN.ini` and relaunch.
-
-> **When to Reset Channel INIs:** Channel-specific INI files (`CwSkimmer-chN.ini`) are seeded once from the master INI and preserved across launches to protect your settings. Most upgrades do **not** require a reset — the streamer rewrites the `[Audio]` and `[Telnet]` sections on every launch.
->
-> Click `Config` → `Streamer INI Files` → **Reset** when:
-> - You changed **Soundcard Driver** (MME ↔ WDM) in the master INI.
-> - You changed **Signal I/O** or **Audio I/O** device selection in the master INI.
-> - A beta release explicitly notes an INI schema change.
-> - CW Skimmer hangs on launch after upgrade and other causes are ruled out.
->
-> The Reset button is disabled while CW Skimmer is running, and only deletes generated channel files — your manual `CwSkimmer.ini` baseline is untouched. The next launch re-seeds the channel files from the current master INI.
->
-> **Logs are separate** and not affected by Reset. They are append-only diagnostic data under `artifacts/logs/`; if disk usage is a concern, delete them manually.
+- Re-run the **Reset / Setup Wizard** from the Config tab. Step 3 lets you
+  re-capture the per-channel MME/WDM device numbers and switch driver mode.
+- The wizard's "Reset and Done" deletes the per-channel INIs so the next
+  launch re-seeds with your updated values. The streamer only writes the
+  `[Audio]` section on first creation, so deleting is what makes wizard
+  changes take effect.
+- Your manual `CwSkimmer.ini` baseline is never modified.
+- **Logs are separate** and not affected by Reset. They are append-only
+  diagnostic data under `artifacts/logs/`; if disk usage is a concern,
+  delete them manually.
 
 ### C) Settings not retained as expected
 

@@ -42,4 +42,32 @@ public sealed class AppSettings
     public double? MainWindowY { get; set; }
     public double? MainWindowWidth { get; set; }
     public double? MainWindowHeight { get; set; }
+
+    // ── Per-channel CW Skimmer device indices (operator-supplied) ────────────
+    // 1-based UI numbers as shown in CW Skimmer's Audio tab dropdowns.
+    // Null = auto-derive at launch (current behavior).
+
+    public int? MmeDeviceIndexCh1 { get; set; }
+    public int? MmeDeviceIndexCh2 { get; set; }
+    public int? MmeDeviceIndexCh3 { get; set; }
+    public int? MmeDeviceIndexCh4 { get; set; }
+
+    public int? WdmDeviceIndexCh1 { get; set; }
+    public int? WdmDeviceIndexCh2 { get; set; }
+    public int? WdmDeviceIndexCh3 { get; set; }
+    public int? WdmDeviceIndexCh4 { get; set; }
+
+    /// <summary>
+    /// Set to true once the operator has been shown the Reset/Setup wizard at
+    /// least once after configuring both CW Skimmer paths. Prevents the wizard
+    /// from re-opening on subsequent launches.
+    /// </summary>
+    public bool HasShownSkimmerSetupWizard { get; set; }
+
+    /// <summary>
+    /// CW Skimmer Soundcard Driver mode applied to all generated channel INIs.
+    /// "MME" (default, recommended) or "WDM" (experimental, requires per-channel
+    /// indices on PCs where WDM ordering differs from auto-derivation).
+    /// </summary>
+    public string SkimmerSoundcardDriverMode { get; set; } = "MME";
 }

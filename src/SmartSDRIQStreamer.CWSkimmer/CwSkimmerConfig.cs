@@ -47,4 +47,19 @@ public sealed record CwSkimmerConfig
     /// correct band/LO context immediately.
     /// </summary>
     public long InitialLoFreqHz { get; init; } = 0;
+
+    /// <summary>
+    /// Operator-supplied 1-based MME signal device index for this channel
+    /// (as shown in CW Skimmer's Audio tab MME dropdown). When set, overrides
+    /// auto-derivation. Null = auto-derive from WinMM enumeration.
+    /// </summary>
+    public int? OperatorMmeSignalDevIndex { get; init; }
+
+    /// <summary>
+    /// Operator-supplied 1-based WDM signal device index for this channel
+    /// (as shown in CW Skimmer's Audio tab WDM dropdown). When set, this
+    /// channel's INI is written with UseWdm=1 and the supplied index.
+    /// Null = use MME mode (current default).
+    /// </summary>
+    public int? OperatorWdmSignalDevIndex { get; init; }
 }

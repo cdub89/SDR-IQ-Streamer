@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         x:Class="SDRIQStreamer.App.SetupWizardWindow"
-        Title="Set Up Wizard"
+        Title="Setup Guide"
         Width="700"
         Height="720"
         WindowStartupLocation="CenterScreen"
@@ -17,7 +17,7 @@
                 Padding="12,10">
             <StackPanel Spacing="4">
                 <TextBlock x:Name="WizardTitleText"
-                           Text="Set Up Wizard"
+                           Text="Setup Guide"
                            FontSize="18"
                            FontWeight="SemiBold"/>
                 <TextBlock x:Name="WizardStepText"

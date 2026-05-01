@@ -114,7 +114,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             return LaunchResult.DeviceNotFound;
         }
 
-        if (!PrepareManagedIniFromTemplate(iniPath, config, out _))
+        if (!PrepareManagedIniFromTemplate(iniPath, config, daxIqChannel, out _))
             return LaunchResult.TemplateIniNotFound;
 
         // Audio section is seeded from calibrated baseline only on first channel INI
@@ -456,7 +456,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         catch (Exception ex) { LogNonFatal("Failed to write diagnostic log.", ex); }
     }
 
-    private bool PrepareManagedIniFromTemplate(string targetIniPath, CwSkimmerConfig config, out string templateIniPath)
+    private bool PrepareManagedIniFromTemplate(string targetIniPath, CwSkimmerConfig config, int daxIqChannel, out string templateIniPath)
     {
         // Preserve per-channel window geometry and other CW-managed sections by
         // reusing an existing managed INI when present.
@@ -477,12 +477,74 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
                 Directory.CreateDirectory(dir);
 
             File.Copy(templateIniPath, targetIniPath, overwrite: true);
+
+            // First-creation only: tile the channel window so multiple
+            // simultaneous CW Skimmer instances don't stack on top of each
+            // other. After CW Skimmer saves its own geometry on close, this
+            // adjustment is never re-applied.
+            OffsetChannelWindowPosition(targetIniPath, daxIqChannel);
+
             return true;
         }
         catch (Exception ex)
         {
             LogNonFatal("Failed to seed managed INI from template.", ex);
             return false;
+        }
+    }
+
+    private static void OffsetChannelWindowPosition(string iniPath, int daxIqChannel)
+    {
+        if (daxIqChannel <= 1)
+            return;
+
+        const int offsetPerChannel = 40;
+        var deltaX = (daxIqChannel - 1) * offsetPerChannel;
+        var deltaY = (daxIqChannel - 1) * offsetPerChannel;
+
+        try
+        {
+            var lines = File.ReadAllLines(iniPath);
+            var inWindows = false;
+            var changed = false;
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var trimmed = lines[i].Trim();
+
+                if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+                {
+                    inWindows = string.Equals(trimmed, "[Windows]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (!inWindows || !trimmed.Contains('='))
+                    continue;
+
+                var eq = lines[i].IndexOf('=');
+                var key = lines[i][..eq].Trim();
+                var rhs = lines[i][(eq + 1)..].Trim();
+                if (!int.TryParse(rhs, NumberStyles.Integer, CultureInfo.InvariantCulture, out var current))
+                    continue;
+
+                if (key.Equals("Left", StringComparison.OrdinalIgnoreCase))
+                {
+                    lines[i] = $"Left={current + deltaX}";
+                    changed = true;
+                }
+                else if (key.Equals("Top", StringComparison.OrdinalIgnoreCase))
+                {
+                    lines[i] = $"Top={current + deltaY}";
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                File.WriteAllLines(iniPath, lines);
+        }
+        catch
+        {
+            // Tiling is cosmetic; failure to apply must not block launch.
         }
     }
 

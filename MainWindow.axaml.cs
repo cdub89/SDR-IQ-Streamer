@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -8,12 +10,15 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Controls.Primitives;
+using Avalonia.Threading;
 
 namespace SDRIQStreamer.App;
 
 public partial class MainWindow : Window
 {
     private readonly AppSettingsSession _settingsSession;
+    private MainWindowViewModel? _subscribedVm;
+    private bool _firstInstallWizardShownThisSession;
 
     public MainWindow()
         : this(new AppSettingsSession(new AppSettingsStore()))
@@ -25,14 +30,88 @@ public partial class MainWindow : Window
         _settingsSession = settingsSession;
         InitializeComponent();
         RestoreWindowPlacement();
+
+        DataContextChanged += OnDataContextChanged;
+        Opened += OnMainWindowOpened;
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        if (_subscribedVm is not null)
+        {
+            _subscribedVm.PropertyChanged -= OnViewModelPropertyChanged;
+            _subscribedVm = null;
+        }
+
         (DataContext as MainWindowViewModel)?.Shutdown();
         SaveWindowPlacement();
         _settingsSession.Save();
         base.OnClosing(e);
+    }
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        if (_subscribedVm is not null)
+            _subscribedVm.PropertyChanged -= OnViewModelPropertyChanged;
+
+        _subscribedVm = DataContext as MainWindowViewModel;
+        if (_subscribedVm is not null)
+            _subscribedVm.PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    private void OnMainWindowOpened(object? sender, EventArgs e)
+    {
+        TryShowFirstInstallWizard();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.CwSkimmerExePath) ||
+            e.PropertyName == nameof(MainWindowViewModel.CwSkimmerIniPath))
+        {
+            TryShowFirstInstallWizard();
+        }
+    }
+
+    private void TryShowFirstInstallWizard()
+    {
+        if (_firstInstallWizardShownThisSession)
+            return;
+
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        var settings = _settingsSession.Settings;
+        if (settings.HasShownSkimmerSetupWizard)
+            return;
+
+        var exePath = vm.CwSkimmerExePath;
+        var iniPath = vm.CwSkimmerIniPath;
+        if (string.IsNullOrWhiteSpace(exePath) ||
+            string.IsNullOrWhiteSpace(iniPath) ||
+            !File.Exists(exePath) ||
+            !File.Exists(iniPath))
+        {
+            return;
+        }
+
+        if (vm.IsCwSkimmerRunning)
+            return;
+
+        _firstInstallWizardShownThisSession = true;
+        settings.HasShownSkimmerSetupWizard = true;
+
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                await ShowResetWizardAsync(vm);
+            }
+            catch
+            {
+                // Wizard is decorative on first launch; never block startup.
+            }
+        });
     }
 
     private async void OnBrowseCwSkimmer(object? sender, RoutedEventArgs e)
@@ -222,73 +301,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        var confirmed = await ShowResetChannelConfigDialogAsync();
-        if (!confirmed)
-            return;
-
-        if (vm.ResetCwSkimmerChannelConfigCommand.CanExecute(null))
-            vm.ResetCwSkimmerChannelConfigCommand.Execute(null);
+        await ShowResetWizardAsync(vm);
     }
 
-    private async Task<bool> ShowResetChannelConfigDialogAsync()
+    private async Task ShowResetWizardAsync(MainWindowViewModel vm)
     {
-        var result = false;
-
-        var message = new TextBlock
-        {
-            Text = "Reset streamer channel INI files (ch1-ch4)?\n\nThis removes only generated channel INIs. Your manual CwSkimmer.ini baseline is not changed.\n\nAfter reset, run CW Skimmer manually and review the Audio tab. Set Soundcard Driver to MME (the only mode SmartStreamer4 currently supports reliably — WDM is experimental). Ensure DAX IQ 1 (FlexRadio DAX) is selected as Signal I/O, and your local speakers/headphones are selected as Audio I/O. Then exit CW Skimmer to save calibration. Channels 2-4 are auto-derived at launch — no per-channel calibration needed.",
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 420
-        };
-
-        var cancelButton = new Button
-        {
-            Content = "Cancel",
-            MinWidth = 80,
-            IsDefault = true
-        };
-        var resetButton = new Button
-        {
-            Content = "Reset",
-            MinWidth = 80,
-            IsCancel = true
-        };
-
-        var dialog = new Window
-        {
-            Title = "Confirm Reset",
-            Width = 470,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Content = new StackPanel
-            {
-                Margin = new Thickness(16),
-                Spacing = 14,
-                Children =
-                {
-                    message,
-                    new StackPanel
-                    {
-                        Orientation = Avalonia.Layout.Orientation.Horizontal,
-                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                        Spacing = 8,
-                        Children = { cancelButton, resetButton }
-                    }
-                }
-            }
-        };
-
-        cancelButton.Click += (_, _) => dialog.Close();
-        resetButton.Click += (_, _) =>
-        {
-            result = true;
-            dialog.Close();
-        };
-
-        await dialog.ShowDialog(this);
-
-        return result;
+        var wizard = new ResetSkimmerWizardWindow(vm, _settingsSession.Settings);
+        await wizard.ShowDialog(this);
     }
 
     private async Task ShowResetBlockedDialogAsync()
