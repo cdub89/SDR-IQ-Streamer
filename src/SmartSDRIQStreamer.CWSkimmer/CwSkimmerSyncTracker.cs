@@ -5,9 +5,8 @@ namespace SDRIQStreamer.CWSkimmer;
 ///
 /// Any source (panadapter event, slice event, RIT change, startup) calls
 /// <see cref="RequestSync"/> with the new desired LO and/or VFO values. A
-/// single background loop coalesces updates, sends only what changed, and
-/// re-emits the current desired state on a slow heartbeat so a command
-/// missed during skimmer's startup race lands on the next tick.
+/// single background loop coalesces updates and sends only what changed —
+/// no command is emitted while desired state matches last-sent.
 ///
 /// Replaces the previous mix of event-push, debounce queues, stability
 /// resends, and telnet-layer duplicate suppression.
@@ -15,7 +14,7 @@ namespace SDRIQStreamer.CWSkimmer;
 public sealed class CwSkimmerSyncTracker : IAsyncDisposable
 {
     private static readonly TimeSpan CoalesceWindow  = TimeSpan.FromMilliseconds(50);
-    private static readonly TimeSpan HeartbeatPeriod = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan WakeupPollPeriod = TimeSpan.FromSeconds(5);
 
     private readonly ICwSkimmerTelnetClient    _telnet;
     private readonly Action<string>?           _onStatus;
@@ -28,7 +27,6 @@ public sealed class CwSkimmerSyncTracker : IAsyncDisposable
     private double?  _desiredVfoMHz;
     private long?    _lastSentLoHz;
     private double?  _lastSentVfoMHz;
-    private DateTime _lastSendUtc;
     private Task?    _runTask;
 
     public CwSkimmerSyncTracker(
@@ -46,8 +44,7 @@ public sealed class CwSkimmerSyncTracker : IAsyncDisposable
     /// <summary>
     /// Update desired skimmer state. Either parameter may be null to leave
     /// it unchanged. Idempotent — safe to call repeatedly with the same
-    /// values; the tracker only emits when desired differs from last-sent
-    /// or when the heartbeat fires.
+    /// values; the tracker only emits when desired differs from last-sent.
     /// </summary>
     public void RequestSync(long? loHz = null, double? vfoMHz = null)
     {
@@ -71,7 +68,7 @@ public sealed class CwSkimmerSyncTracker : IAsyncDisposable
         {
             try
             {
-                await _wakeup.WaitAsync(HeartbeatPeriod, ct);
+                await _wakeup.WaitAsync(WakeupPollPeriod, ct);
             }
             catch (OperationCanceledException) { return; }
 
@@ -90,38 +87,28 @@ public sealed class CwSkimmerSyncTracker : IAsyncDisposable
                 desiredVfo = _desiredVfoMHz;
             }
 
-            var idleResend = _lastSendUtc != default &&
-                             (DateTime.UtcNow - _lastSendUtc) >= HeartbeatPeriod;
-
-            var anySent = false;
-
-            if (desiredLo.HasValue && (desiredLo != _lastSentLoHz || idleResend))
+            if (desiredLo.HasValue && desiredLo != _lastSentLoHz)
             {
                 try
                 {
                     await _telnet.SendLoFreqAsync(desiredLo.Value, ct);
                     _lastSentLoHz = desiredLo;
-                    anySent = true;
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex) { _onStatus?.Invoke($"LO sync failed: {ex.Message}"); }
             }
 
-            if (desiredVfo.HasValue && (desiredVfo != _lastSentVfoMHz || idleResend))
+            if (desiredVfo.HasValue && desiredVfo != _lastSentVfoMHz)
             {
                 try
                 {
                     await _telnet.SendQsyAsync(desiredVfo.Value * 1000.0, ct);
                     _lastSentVfoMHz = desiredVfo;
                     _onQsyEmitted?.Invoke(desiredVfo.Value, DateTime.UtcNow);
-                    anySent = true;
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex) { _onStatus?.Invoke($"QSY sync failed: {ex.Message}"); }
             }
-
-            if (anySent)
-                _lastSendUtc = DateTime.UtcNow;
         }
     }
 
