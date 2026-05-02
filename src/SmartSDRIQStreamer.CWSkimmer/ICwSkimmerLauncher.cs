@@ -58,6 +58,14 @@ public interface ICwSkimmerLauncher
     event Action<string>? TelnetStatusChanged;
 
     /// <summary>
+    /// Fires after the sync tracker successfully sends a SKIMMER/QSY command.
+    /// Arguments are DAX-IQ channel, frequency in MHz, and the send timestamp.
+    /// Used by inbound echo suppression to recognize our own commands when
+    /// they're echoed back by CW Skimmer as click events.
+    /// </summary>
+    event Action<int, double, DateTime>? OutboundQsyEmitted;
+
+    /// <summary>
     /// Writes the INI, optionally waits <see cref="CwSkimmerConfig.LaunchDelaySeconds"/>,
     /// then starts CwSkimmer.exe with <c>ini=&lt;path&gt;</c>.
     /// Connects the telnet client in the background after
@@ -70,16 +78,13 @@ public interface ICwSkimmerLauncher
         CwSkimmerConfig config);
 
     /// <summary>
-    /// Send <c>SKIMMER/LO_FREQ</c> to update one CW Skimmer instance's centre frequency
-    /// when the panadapter moves.  No-op if the channel telnet is not connected.
+    /// Update the desired CW Skimmer state for a channel. Either parameter may
+    /// be null to leave it unchanged. The per-channel sync tracker coalesces
+    /// rapid updates, sends only what differs from last-confirmed, and re-emits
+    /// on a slow heartbeat so a command missed during skimmer's startup race
+    /// lands on the next tick. No-op if the channel telnet is not connected.
     /// </summary>
-    Task UpdateLoFreqAsync(int daxIqChannel, long freqHz);
-
-    /// <summary>
-    /// Send <c>SKIMMER/QSY</c> to update one CW Skimmer instance's operating/VFO frequency
-    /// shown in the main window.  No-op if the channel telnet is not connected.
-    /// </summary>
-    Task UpdateSliceFreqAsync(int daxIqChannel, double freqMHz);
+    void RequestSkimmerSync(int daxIqChannel, long? loHz = null, double? vfoMHz = null);
 
     /// <summary>Kills all CW Skimmer processes and disconnects telnet if running.</summary>
     void Stop();

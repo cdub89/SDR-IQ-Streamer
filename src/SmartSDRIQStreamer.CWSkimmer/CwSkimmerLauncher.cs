@@ -22,6 +22,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
     private readonly Dictionary<int, Process> _processesByChannel = new();
     private readonly Dictionary<int, ICwSkimmerTelnetClient> _telnetByChannel = new();
+    private readonly Dictionary<int, CwSkimmerSyncTracker> _trackerByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _telnetLifecycleCtsByChannel = new();
     private readonly Dictionary<int, int> _telnetPortByChannel = new();
     private readonly Dictionary<int, string> _managedIniPathByChannel = new();
@@ -58,6 +59,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     public event Action<int, double>? FrequencyClicked;
     public event Action<int, CwSkimmerSpotInfo>? SpotReceived;
     public event Action<string>? TelnetStatusChanged;
+    public event Action<int, double, DateTime>? OutboundQsyEmitted;
 
     public string LastDiagnostics { get; private set; } = string.Empty;
 
@@ -216,13 +218,15 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
                 if (config.TelnetClusterEnabled)
                 {
-                    // Sync initial LO and VFO immediately after connect so CW Skimmer
-                    // starts on the correct band/frequency context.
-                    if (initialLoFreqHz > 0)
-                        await telnet.SendLoFreqAsync(initialLoFreqHz, ct);
-
-                    if (initialSliceFreqMHz > 0)
-                        await telnet.SendQsyAsync(initialSliceFreqMHz * 1000.0, ct);
+                    // Bring the per-channel sync tracker online and seed it with
+                    // the initial desired state. The tracker's heartbeat re-emits
+                    // these values until CW Skimmer is ready to receive them,
+                    // which fixes the startup race where the first command is
+                    // dropped before skimmer's IQ pipeline finishes warming up.
+                    var tracker = GetOrCreateSyncTracker(daxIqChannel, telnet);
+                    tracker.RequestSync(
+                        loHz:   initialLoFreqHz   > 0 ? initialLoFreqHz : null,
+                        vfoMHz: initialSliceFreqMHz > 0 ? initialSliceFreqMHz : null);
                 }
 
                 return;
@@ -244,22 +248,13 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
         }
     }
 
-    public async Task UpdateLoFreqAsync(int daxIqChannel, long freqHz)
+    public void RequestSkimmerSync(int daxIqChannel, long? loHz = null, double? vfoMHz = null)
     {
-        if (!TryGetTelnetClient(daxIqChannel, out var telnet))
-            return;
+        CwSkimmerSyncTracker? tracker;
+        lock (_sync)
+            _trackerByChannel.TryGetValue(daxIqChannel, out tracker);
 
-        try { await telnet.SendLoFreqAsync(freqHz); }
-        catch (Exception ex) { LogNonFatal("LO frequency sync failed.", ex); }
-    }
-
-    public async Task UpdateSliceFreqAsync(int daxIqChannel, double freqMHz)
-    {
-        if (!TryGetTelnetClient(daxIqChannel, out var telnet))
-            return;
-
-        try { await telnet.SendQsyAsync(freqMHz * 1000.0); }
-        catch (Exception ex) { LogNonFatal("Slice frequency sync failed.", ex); }
+        tracker?.RequestSync(loHz: loHz, vfoMHz: vfoMHz);
     }
 
     public void Stop()
@@ -600,6 +595,23 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             return _telnetByChannel.TryGetValue(daxIqChannel, out telnet!);
     }
 
+    private CwSkimmerSyncTracker GetOrCreateSyncTracker(int daxIqChannel, ICwSkimmerTelnetClient telnet)
+    {
+        lock (_sync)
+        {
+            if (_trackerByChannel.TryGetValue(daxIqChannel, out var existing))
+                return existing;
+
+            var tracker = new CwSkimmerSyncTracker(
+                telnet,
+                onStatus:     msg => EmitLauncherStatus(daxIqChannel, msg),
+                onQsyEmitted: (mhz, utc) => OutboundQsyEmitted?.Invoke(daxIqChannel, mhz, utc));
+            tracker.Start();
+            _trackerByChannel[daxIqChannel] = tracker;
+            return tracker;
+        }
+    }
+
     private ICwSkimmerTelnetClient GetOrCreateTelnetClient(int daxIqChannel)
     {
         lock (_sync)
@@ -684,6 +696,7 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
     private async Task DisconnectTelnetAsync(int daxIqChannel)
     {
         ICwSkimmerTelnetClient? telnet = null;
+        CwSkimmerSyncTracker? tracker = null;
         CancellationTokenSource? lifecycleCts = null;
         lock (_sync)
         {
@@ -691,6 +704,12 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
             {
                 telnet = existing;
                 _telnetByChannel.Remove(daxIqChannel);
+            }
+
+            if (_trackerByChannel.TryGetValue(daxIqChannel, out var existingTracker))
+            {
+                tracker = existingTracker;
+                _trackerByChannel.Remove(daxIqChannel);
             }
 
             if (_telnetLifecycleCtsByChannel.TryGetValue(daxIqChannel, out var cts))
@@ -705,6 +724,12 @@ public sealed class CwSkimmerLauncher : ICwSkimmerLauncher, IDisposable
 
         try
         {
+            if (tracker is not null)
+            {
+                try { await tracker.DisposeAsync(); }
+                catch (Exception ex) { LogNonFatal($"Sync tracker dispose failed (ch {daxIqChannel}).", ex); }
+            }
+
             if (telnet is not null)
             {
                 try { await telnet.DisconnectAsync(); }

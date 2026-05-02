@@ -190,9 +190,6 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
     public ObservableCollection<string> FooterStatusLines { get; } = new();
     private readonly Dictionary<int, string> _lastCwDevicePreviewByChannel = new();
-    private readonly Dictionary<int, long> _lastLoCenterHzByChannel = new();
-    private readonly Dictionary<int, CancellationTokenSource> _sliceSyncCtsByChannel = new();
-    private readonly Dictionary<int, CancellationTokenSource> _stabilityResendCtsByChannel = new();
     private readonly Dictionary<int, CancellationTokenSource> _streamRemovedDebounceCtsByChannel = new();
     private readonly CancellationTokenSource _updateCheckLoopCts = new();
     private readonly SemaphoreSlim _updateCheckLock = new(1, 1);
@@ -211,8 +208,6 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private static readonly TimeSpan DuplicateClickWindow = TimeSpan.FromMilliseconds(250);
     private const int FallbackClickSnapStepHz = 50;
     private static readonly TimeSpan RitStatusMinInterval = TimeSpan.FromMilliseconds(500);
-    private const long PanSyncMinCenterDeltaHz = 10;
-    private static readonly TimeSpan PanSyncStabilityResendDelay = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan DaxStreamRemovedGracePeriod = TimeSpan.FromMilliseconds(1500);
     [ObservableProperty]
     private string _footerStatusText = string.Empty;
@@ -359,6 +354,12 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
             _ = PublishSkimmerSpotAsync(spot);
         };
 
+        // Mirror sync-tracker outbound QSYs into echo-suppression state so
+        // CW Skimmer's click feedback for our own commands is recognized and
+        // doesn't loop back as a tune request.
+        _launcher.OutboundQsyEmitted += (daxIqChannel, freqMHz, _) =>
+            RecordOutboundQsy(daxIqChannel, freqMHz);
+
         // Load persisted settings without emitting user-facing change notices.
         _isApplyingStartupSettings = true;
         try
@@ -470,27 +471,11 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
                 DaxStreamingSummary = "DAX Streaming : 0.0 Mbps (0 kbps)";
                 ResetDisplayedNetworkStatus();
                 _lastCwDevicePreviewByChannel.Clear();
-                _lastLoCenterHzByChannel.Clear();
                 _lastRitStateBySlice.Clear();
                 lock (_syncDampenGate)
                 {
                     _lastOutboundQsyByChannel.Clear();
                     _lastInboundClickByChannel.Clear();
-                }
-                lock (_syncDampenGate)
-                {
-                    foreach (var cts in _sliceSyncCtsByChannel.Values)
-                    {
-                        try { cts.Cancel(); } catch { }
-                        cts.Dispose();
-                    }
-                    _sliceSyncCtsByChannel.Clear();
-                    foreach (var cts in _stabilityResendCtsByChannel.Values)
-                    {
-                        try { cts.Cancel(); } catch { }
-                        cts.Dispose();
-                    }
-                    _stabilityResendCtsByChannel.Clear();
                     foreach (var cts in _streamRemovedDebounceCtsByChannel.Values)
                     {
                         try { cts.Cancel(); } catch { }
@@ -1807,64 +1792,6 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
             ?.DAXIQChannel ?? 0;
     }
 
-    private void QueueSliceSync(int daxIqChannel, double freqMHz)
-    {
-        if (!TelnetClusterEnabled || daxIqChannel <= 0)
-            return;
-
-        var cts = ReplaceSyncCts(daxIqChannel);
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(120, cts.Token);
-                RecordOutboundQsy(daxIqChannel, freqMHz);
-                await _launcher.UpdateSliceFreqAsync(daxIqChannel, freqMHz);
-            }
-            catch (OperationCanceledException) { }
-        });
-    }
-
-    private CancellationTokenSource ReplaceSyncCts(int daxIqChannel)
-    {
-        var next = new CancellationTokenSource();
-        CancellationTokenSource? previous;
-
-        lock (_syncDampenGate)
-        {
-            _sliceSyncCtsByChannel.TryGetValue(daxIqChannel, out previous);
-            _sliceSyncCtsByChannel[daxIqChannel] = next;
-        }
-
-        if (previous is not null)
-        {
-            try { previous.Cancel(); } catch { }
-            previous.Dispose();
-        }
-
-        return next;
-    }
-
-    private CancellationTokenSource ReplaceStabilityResendCts(int daxIqChannel)
-    {
-        var next = new CancellationTokenSource();
-        CancellationTokenSource? previous;
-
-        lock (_syncDampenGate)
-        {
-            _stabilityResendCtsByChannel.TryGetValue(daxIqChannel, out previous);
-            _stabilityResendCtsByChannel[daxIqChannel] = next;
-        }
-
-        if (previous is not null)
-        {
-            try { previous.Cancel(); } catch { }
-            previous.Dispose();
-        }
-
-        return next;
-    }
-
     private CancellationTokenSource ReplaceStreamRemovedDebounceCts(int daxIqChannel)
     {
         var next = new CancellationTokenSource();
@@ -1896,26 +1823,6 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         if (toDispose is null) return;
         try { toDispose.Cancel(); } catch { }
         toDispose.Dispose();
-    }
-
-    private void QueuePanSyncStabilityResend(int daxIqChannel, double freqMHz, string reason)
-    {
-        var cts = ReplaceStabilityResendCts(daxIqChannel);
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(PanSyncStabilityResendDelay, cts.Token);
-                if (!TelnetClusterEnabled || !IsCwSkimmerRunning)
-                    return;
-
-                RecordOutboundQsy(daxIqChannel, freqMHz);
-                await _launcher.UpdateSliceFreqAsync(daxIqChannel, freqMHz);
-                UIPost(() => AddTelnetStatus(
-                    $"QSY stability resend ({reason}): ch {daxIqChannel} -> {freqMHz:F6} MHz."));
-            }
-            catch (OperationCanceledException) { }
-        });
     }
 
     private void RecordOutboundQsy(int daxIqChannel, double freqMHz)
@@ -2073,7 +1980,7 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
 
         var daxIqChannel = ResolveSliceDaxIqChannel(slice);
         if (daxIqChannel > 0)
-            QueueSliceSync(daxIqChannel, effectiveRxFreqMHz);
+            _launcher.RequestSkimmerSync(daxIqChannel, vfoMHz: effectiveRxFreqMHz);
     }
 
     private bool IsOwnStationSlice(SliceInfo slice)
@@ -2122,8 +2029,6 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
     private static string BuildSliceRitKey(SliceInfo slice)
         => $"{slice.ClientStation}|{slice.Letter}";
 
-    private static int GetBandBucketMHz(long freqHz) => (int)(freqHz / 1_000_000L);
-
     private long? ResolveEffectiveRxFrequencyHzForChannel(int daxIqChannel)
     {
         if (daxIqChannel <= 0)
@@ -2162,32 +2067,23 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         }
 
         var centerHz = (long)Math.Round(centerFreqMHz * 1_000_000d);
-        var hasPrevious = _lastLoCenterHzByChannel.TryGetValue(daxIqChannel, out var previousHz);
-        var centerDeltaHz = hasPrevious ? Math.Abs(centerHz - previousHz) : long.MaxValue;
-        if (hasPrevious && centerDeltaHz < PanSyncMinCenterDeltaHz)
-            return;
-
-        _lastLoCenterHzByChannel[daxIqChannel] = centerHz;
-
-        var bandChangeText = hasPrevious && GetBandBucketMHz(centerHz) != GetBandBucketMHz(previousHz)
-            ? "band change"
-            : "pan move";
-
-        _ = _launcher.UpdateLoFreqAsync(daxIqChannel, centerHz);
-
         var effectiveRxFreqHz = ResolveEffectiveRxFrequencyHzForChannel(daxIqChannel);
-        if (!effectiveRxFreqHz.HasValue)
+        var effectiveRxFreqMHz = effectiveRxFreqHz.HasValue
+            ? effectiveRxFreqHz.Value / 1_000_000d
+            : (double?)null;
+
+        _launcher.RequestSkimmerSync(daxIqChannel, loHz: centerHz, vfoMHz: effectiveRxFreqMHz);
+
+        if (effectiveRxFreqMHz.HasValue)
         {
             AddTelnetStatus(
-                $"LO sync ({reason}): ch {daxIqChannel} -> {centerHz} Hz ({bandChangeText}); slice frequency unavailable.");
-            return;
+                $"LO/QSY sync ({reason}): ch {daxIqChannel}, LO {centerHz} Hz, RX {effectiveRxFreqMHz.Value:F6} MHz.");
         }
-
-        var effectiveRxFreqMHz = effectiveRxFreqHz.Value / 1_000_000d;
-        QueueSliceSync(daxIqChannel, effectiveRxFreqMHz);
-        QueuePanSyncStabilityResend(daxIqChannel, effectiveRxFreqMHz, reason);
-        AddTelnetStatus(
-            $"LO/QSY sync ({reason}): ch {daxIqChannel} {bandChangeText}, LO {centerHz} Hz, RX {effectiveRxFreqMHz:F6} MHz.");
+        else
+        {
+            AddTelnetStatus(
+                $"LO sync ({reason}): ch {daxIqChannel} -> {centerHz} Hz; slice frequency unavailable.");
+        }
     }
 
     private void EnsureSelectedControlStation()
