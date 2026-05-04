@@ -69,7 +69,7 @@ public partial class MainWindow : Window
     {
         while (true)
         {
-            if (Process.GetProcessesByName("DAX").Length > 0)
+            if (IsDaxRunning())
             {
                 _subscribedVm?.AddStreamerStatus("DAX.exe is running.");
                 return;
@@ -80,6 +80,13 @@ public partial class MainWindow : Window
             if (!retry)
                 return;
         }
+    }
+
+    private static bool IsDaxRunning()
+    {
+        var procs = Process.GetProcessesByName("DAX");
+        try { return procs.Length > 0; }
+        finally { foreach (var p in procs) p.Dispose(); }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -393,7 +400,8 @@ public partial class MainWindow : Window
         {
             Content = "Ignore",
             MinWidth = 80,
-            IsDefault = true
+            IsDefault = true,
+            IsCancel = true
         };
 
         var dialog = new Window
