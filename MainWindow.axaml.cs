@@ -59,9 +59,34 @@ public partial class MainWindow : Window
             _subscribedVm.PropertyChanged += OnViewModelPropertyChanged;
     }
 
-    private void OnMainWindowOpened(object? sender, EventArgs e)
+    private async void OnMainWindowOpened(object? sender, EventArgs e)
     {
+        await EnsureDaxRunningAsync();
         TryShowFirstInstallWizard();
+    }
+
+    private async Task EnsureDaxRunningAsync()
+    {
+        while (true)
+        {
+            if (IsDaxRunning())
+            {
+                _subscribedVm?.AddStreamerStatus("DAX.exe is running.");
+                return;
+            }
+
+            _subscribedVm?.AddStreamerStatus("DAX.exe not found.");
+            bool retry = await ShowDaxNotRunningDialogAsync();
+            if (!retry)
+                return;
+        }
+    }
+
+    private static bool IsDaxRunning()
+    {
+        var procs = Process.GetProcessesByName("DAX");
+        try { return procs.Length > 0; }
+        finally { foreach (var p in procs) p.Dispose(); }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -352,6 +377,68 @@ public partial class MainWindow : Window
 
         okButton.Click += (_, _) => dialog.Close();
         await dialog.ShowDialog(this);
+    }
+
+    private async Task<bool> ShowDaxNotRunningDialogAsync()
+    {
+        var message = new TextBlock
+        {
+            Text = "Please start or ensure DAX is running",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 400
+        };
+
+        bool retryClicked = false;
+
+        var retryButton = new Button
+        {
+            Content = "Retry",
+            MinWidth = 80
+        };
+
+        var ignoreButton = new Button
+        {
+            Content = "Ignore",
+            MinWidth = 80,
+            IsDefault = true,
+            IsCancel = true
+        };
+
+        var dialog = new Window
+        {
+            Title = "Dax.exe Not Running Error",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(16),
+                Spacing = 14,
+                Children =
+                {
+                    message,
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children = { retryButton, ignoreButton }
+                    }
+                }
+            }
+        };
+
+        retryButton.Click += (_, _) =>
+        {
+            retryClicked = true;
+            dialog.Close();
+        };
+
+        ignoreButton.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
+        return retryClicked;
     }
 
 }

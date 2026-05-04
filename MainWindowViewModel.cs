@@ -1291,7 +1291,7 @@ private static readonly (string ReleaseTag, string CommitHash, string Display, s
         FooterStatusText = _footerStatusBuffer.Add(message);
     }
 
-    private void AddStreamerStatus(string message)
+    internal void AddStreamerStatus(string message)
     {
         AddFooterStatus($"[STREAMER] {message}");
         AppendStreamerLog(message);
