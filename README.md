@@ -88,7 +88,7 @@ The Reset button is disabled while CW Skimmer is running, and only deletes gener
 ### Build
 
 ```powershell
-dotnet build
+dotnet build SmartSDRIQStreamer.csproj
 ```
 
 ### Run (development)
@@ -100,7 +100,7 @@ dotnet run
 ### Run (Release executable)
 
 ```powershell
-dotnet build -c Release
+dotnet build SmartSDRIQStreamer.csproj -c Release
 .\bin\Release\net8.0-windows\SmartStreamer4.exe
 ```
 
@@ -139,7 +139,7 @@ gh release create v<version> \
 ### Tests
 
 ```powershell
-dotnet test tests
+dotnet test tests/SmartSDRIQStreamer.CWSkimmer.Tests
 ```
 
 ## 8) Project Layout
